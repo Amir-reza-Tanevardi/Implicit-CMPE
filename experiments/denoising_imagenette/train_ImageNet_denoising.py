@@ -309,7 +309,7 @@ def build_trainer(args, forward_train=None):
         s1=args.s1
     )
 
-    trainer = Trainer(amortizer, configurator=configurator_masked,
+    trainer = Trainer(amortizer, configurator=configurator_blurred,
                       checkpoint_path=args.checkpoint_path)
 
     if forward_train is not None:
@@ -358,7 +358,7 @@ if __name__=='__main__':
     parser.add_argument('--base-channels', type=int, default=64)
     parser.add_argument("--optimizer", type=str, default="adamw")
     parser.add_argument('--fine-tune-summary', action='store_true')
-    parser.add_argument('--checkpoint-path', type=str, default='checkpoints/imagenet-unet-ipainting')
+    parser.add_argument('--checkpoint-path', type=str, default='checkpoints/imagenet-unet-deblurring')
     parser.add_argument("--method", type=str, default="cmpe", choices=["cmpe", "fmpe"])
     parser.add_argument("--architecture", type=str, default="unet", choices=["unet", "naive"])
     args = parser.parse_args()
