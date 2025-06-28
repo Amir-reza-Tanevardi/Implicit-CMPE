@@ -4,6 +4,7 @@ import os
 import pickle
 import sys
 
+import bayesflow as bf
 import numpy as np
 import tensorflow as tf
 from bayesflow.experimental.rectifiers import RectifiedDistribution
@@ -16,123 +17,229 @@ from tensorflow.keras import layers
 sys.path.append("../../")
 from amortizers import ConsistencyAmortizer
 
-# --- Data Preprocessing ---
+def inpainting_mask(image, mask_size=8):
+    """Applies an inpainting mask by zeroing out a square region in the image.
 
-def load_imagenet(img_size, split):
-    """Loads ImageNet using TensorFlow Datasets."""
-    import tensorflow_datasets as tfds
-    def _preprocess(image, label):
-        image = tf.image.resize(image, [img_size, img_size])
-        image = tf.cast(image, tf.float32) / 255.0  # [0,1]
-        image = image * 2.0 - 1.0  # [-1,1]
-        return image, image
+    Parameters:
+    ----------
+    image     : input image to be masked.
+    mask_size : size of the square mask (in pixels).
+    """
+    H, W = image.shape
+    masked_image = image.copy()
 
-    ds = tfds.load('imagenette/160px', split=split, as_supervised=True)
-    ds = ds.map(_preprocess, num_parallel_calls=tf.data.AUTOTUNE)
-    ds = ds.shuffle(1024).prefetch(tf.data.AUTOTUNE)
-    return ds
-
-# --- Masking and Corruption ---
-
-def inpainting_mask(image, mask_size=32):
-    # image: numpy array HxWx3 in [-1,1]
-    H, W, C = image.shape
+    # Random location for the top-left corner of the square mask
     top = np.random.randint(0, H - mask_size)
     left = np.random.randint(0, W - mask_size)
-    masked = image.copy()
-    masked[top:top + mask_size, left:left + mask_size, :] = 0.0
-    return masked
 
+    # Set the square region to 0 (or some neutral value)
+    masked_image[top:top + mask_size, left:left + mask_size] = 0.0
 
-def grayscale_camera_rgb(theta, noise='poisson', psf_width=2.5, noise_scale=1.0, noise_gain=0.5):
-    # Apply noise+blur channel-wise
-    noisy = noise_gain * random_noise(noise_scale * theta, mode=noise)
-    blurred = np.stack([gaussian_filter(noisy[..., c], sigma=psf_width) for c in range(3)], axis=-1)
-    return blurred
-
-# --- Configurators ---
-
-def configurator_blurred(f):
-    """
-    Parameters:
-    f['prior_draws']: numpy array (B, H, W, C)
-    f['sim_data']: numpy array (B, H, W, C)
-    Returns:
-     - parameters: flattened prior_draws (B, H*W*C)
-     - summary_conditions: blurred sim_data (B, H, W, C)
-    """
-    B, H, W, C = f['prior_draws'].shape
-    # Flatten parameters (already normalized)
-    p = f['prior_draws'].reshape(B, -1).astype(np.float32)
-    # Create blurred summary conditions
-    blurred = np.stack([grayscale_camera_rgb(f['sim_data'][b]) for b in range(B)], axis=0).astype(np.float32)
-    return {'parameters': p, 'summary_conditions': blurred}
-
+    return masked_image
 
 def configurator_masked(f):
-    """
-    Applies an inpainting mask to sim_data instead of blur.
-    Returns masked images as summary_conditions.
-    """
-    B, H, W, C = f['prior_draws'].shape
-    p = f['prior_draws'].reshape(B, -1).astype(np.float32)
-    masked = np.stack([inpainting_mask(f['sim_data'][b]) for b in range(B)], axis=0).astype(np.float32)
-    return {'parameters': p, 'summary_conditions': masked}
+    out = {}
 
-# --- Network Blocks ---
+    B = f["prior_draws"].shape[0]
+    H = f["prior_draws"].shape[1]
+    W = f["prior_draws"].shape[2]
 
+    # Normalize image between -1 and 1
+    p = (f["prior_draws"]).reshape((B, H * W)).astype(np.float32)
+    p = -1.0 + (p * 2) / 255.0
+
+    # Apply inpainting mask instead of blur
+    masked_images = np.stack([inpainting_mask(f["sim_data"][b]) for b in range(B)]).astype(np.float32)
+
+    # Add posterior inputs + masked summary conditions
+    out["parameters"] = p.reshape((B, H * W))
+    out["summary_conditions"] = masked_images[..., None]  # Add channel dimension
+    return out
+
+
+def grayscale_camera(theta, noise="poisson", psf_width=2.5, noise_scale=1, noise_gain=0.5):
+    """Creates a noisy blurred image.
+
+    Parameters:
+    ----------
+    theta       : input image to be blurred.
+    noise       : noise type.
+    psf_width   : width of point-spread function.
+    noise_scale : scale for noise distribution.
+    noise_gain  : gain for noise distribution.
+    """
+
+    image1 = noise_gain * random_noise(noise_scale * theta, mode=noise)
+    image2 = gaussian_filter(image1, sigma=psf_width)
+    return image2
+
+
+def configurator(f):
+    out = {}
+
+    B = f["prior_draws"].shape[0]
+    H = f["prior_draws"].shape[1]
+    W = f["prior_draws"].shape[2]
+
+    # Normalize image between -1 and 1
+    p = (f["prior_draws"]).reshape((B, H * W)).astype(np.float32)
+    p = -1.0 + (p * 2) / 255.0
+
+    # Add blurr
+    blurred = np.stack([grayscale_camera(f["sim_data"][b]) for b in range(B)]).astype(np.float32)
+
+    # Add posterior inputs + some dequantization noise
+    out["parameters"] = p.reshape((B, H * W))
+    out["summary_conditions"] = blurred[..., None]
+    return out
+
+
+class GeneralDriftNetwork(tf.keras.Model):
+    """Implements a learnable velocity field for a neural ODE. Will typically be used
+    in conjunction with a ``RectifyingFlow`` instance, as proposed by [1] in the context
+    of unconditional image generation.
+
+    [1] Liu, X., Gong, C., & Liu, Q. (2022).
+    Flow straight and fast: Learning to generate and transfer data with rectified flow.
+    arXiv preprint arXiv:2209.03003.
+    """
+
+    def __init__(
+        self,
+        net,
+        input_dim,
+        **kwargs,
+    ):
+        """Creates a learnable velocity field instance to be used in the context of rectifying
+        flows or neural ODEs.
+
+        [1] Liu, X., Gong, C., & Liu, Q. (2022).
+        Flow straight and fast: Learning to generate and transfer data with rectified flow.
+        arXiv preprint arXiv:2209.03003.
+
+        Parameters
+        ----------
+        net: tf.keras.Model
+            The network to use as a drift network
+        """
+
+        super().__init__(**kwargs)
+
+        # set for compatibility with RectifiedDistribution
+        self.latent_dim = input_dim
+        self.net = net
+
+    def call(self, target_vars, latent_vars, time, condition, **kwargs):
+        """Performs a linear interpolation between target and latent variables
+        over time (i.e., a single ODE step during training).
+
+        Parameters
+        ----------
+        target_vars : tf.Tensor of shape (batch_size, ..., num_targets)
+            The variables of interest (e.g., parameters) over which we perform inference.
+        latent_vars : tf.Tensor of shape (batch_size, ..., num_targets)
+            The sampled random variates from the base distribution.
+        time        : tf.Tensor of shape (batch_size, ..., 1)
+            A vector of time indices in (0, 1)
+        condition   : tf.Tensor of shape (batch_size, ..., condition_dim)
+            The optional conditioning variables (e.g., as returned by a summary network)
+        **kwargs    : dict, optional, default: {}
+            Optional keyword arguments passed to the ``tf.keras.Model`` call() method
+        """
+
+        diff = target_vars - latent_vars
+        wdiff = time * target_vars + (1 - time) * latent_vars
+        drift = self.drift(wdiff, time, condition, **kwargs)
+        return diff, drift
+
+    def drift(self, target_t, time, condition, **kwargs):
+        """Returns the drift at target_t time given optional condition(s).
+
+        Parameters
+        ----------
+        target_t    : tf.Tensor of shape (batch_size, ..., num_targets)
+            The variables of interest (e.g., parameters) over which we perform inference.
+        time        : tf.Tensor of shape (batch_size, ..., 1)
+            A vector of time indices in (0, 1)
+        condition   : tf.Tensor of shape (batch_size, ..., condition_dim)
+            The optional conditioning variables (e.g., as returned by a summary network)
+        **kwargs    : dict, optional, default: {}
+            Optional keyword arguments passed to the drift network.
+        """
+        inp = [
+            tf.reshape(target_t, (-1, tf.shape(target_t)[-1])),
+            tf.reshape(condition, (-1, tf.shape(condition)[-1])),
+            tf.reshape(time, (-1, 1)),
+        ]
+        net_out = self.net(inp, **kwargs)
+        return tf.reshape(net_out, tf.shape(target_t))
+
+
+# Source code for networks adapted from: https://keras.io/examples/generative/ddpm/
+# Kernel initializer to use
 def kernel_init(scale):
     scale = max(scale, 1e-10)
-    return keras.initializers.VarianceScaling(scale, mode='fan_avg', distribution='uniform')
+    return keras.initializers.VarianceScaling(scale, mode="fan_avg", distribution="uniform")
+
 
 class AttentionBlock(layers.Layer):
+    """Applies self-attention.
+
+    Args:
+        units: Number of units in the dense layers
+        groups: Number of groups to be used for GroupNormalization layer
+    """
+
     def __init__(self, units, groups=8, **kwargs):
+        self.units = units
+        self.groups = groups
         super().__init__(**kwargs)
-        self.norm = layers.GroupNormalization(groups)
+
+        self.norm = layers.GroupNormalization(groups=groups)
         self.query = layers.Dense(units, kernel_initializer=kernel_init(1.0))
-        self.key   = layers.Dense(units, kernel_initializer=kernel_init(1.0))
+        self.key = layers.Dense(units, kernel_initializer=kernel_init(1.0))
         self.value = layers.Dense(units, kernel_initializer=kernel_init(1.0))
-        self.proj  = layers.Dense(units, kernel_initializer=kernel_init(0.0))
+        self.proj = layers.Dense(units, kernel_initializer=kernel_init(0.0))
 
-    def call(self, x):
-        b, h, w, c = tf.shape(x)[0], tf.shape(x)[1], tf.shape(x)[2], tf.shape(x)[3]
-        x_norm = self.norm(x)
+    #@tf.function
+    def call(self, inputs):
+        batch_size = tf.shape(inputs)[0]
+        height = tf.shape(inputs)[1]
+        width = tf.shape(inputs)[2]
+        scale = tf.cast(self.units, tf.float32) ** (-0.5)
 
-        q = self.query(x_norm)  # (b, h, w, c)
-        k = self.key(x_norm)
-        v = self.value(x_norm)
+        inputs = self.norm(inputs)
+        q = self.query(inputs)
+        k = self.key(inputs)
+        v = self.value(inputs)
 
-        # Flatten spatial dimensions
-        q_flat = tf.reshape(q, [b, h * w, c])  # (b, N, c)
-        k_flat = tf.reshape(k, [b, h * w, c])
-        v_flat = tf.reshape(v, [b, h * w, c])
+        attn_score = tf.einsum("bhwc, bHWc->bhwHW", q, k) * scale
+        attn_score = tf.reshape(attn_score, [batch_size, height, width, height * width])
 
-        # Compute scaled dot-product attention
-        scale = tf.cast(c, tf.float32) ** -0.5
-        attn_weights = tf.matmul(q_flat, k_flat, transpose_b=True) * scale  # (b, N, N)
-        attn_weights = tf.nn.softmax(attn_weights, axis=-1)
+        attn_score = tf.nn.softmax(attn_score, -1)
+        attn_score = tf.reshape(attn_score, [batch_size, height, width, height, width])
 
-        # Attention output
-        attn_out = tf.matmul(attn_weights, v_flat)  # (b, N, c)
-        attn_out = tf.reshape(attn_out, [b, h, w, c])
-        out = self.proj(attn_out)
-        return x + out
+        proj = tf.einsum("bhwHW,bHWc->bhwc", attn_score, v)
+        proj = self.proj(proj)
+        return inputs + proj
 
 
 class TimeEmbedding(layers.Layer):
     def __init__(self, dim, tmax, **kwargs):
         super().__init__(**kwargs)
-        self.dim = dim; self.tmax = tmax
-        half = dim // 2
-        emb = tf.range(half, dtype=tf.float32)
-        self.inv_freq = tf.exp(-tf.math.log(10000.0) * emb / (half - 1))
-    def call(self, t):
-        t = tf.cast(t, tf.float32) * (1000.0 / self.tmax)
-        sin = tf.sin(tf.expand_dims(t, -1) * self.inv_freq)
-        cos = tf.cos(tf.expand_dims(t, -1) * self.inv_freq)
-        return tf.concat([sin, cos], -1)
+        self.dim = dim
+        self.tmax = tmax
+        self.half_dim = dim // 2
+        self.emb = tf.math.log(10000.0) / (self.half_dim - 1)
+        self.emb = tf.exp(tf.range(self.half_dim, dtype=tf.float32) * -self.emb)
 
-# ResidualBlock, DownSample, UpSample, TimeMLP implementations omitted for brevity
+    @tf.function
+    def call(self, inputs):
+        inputs = tf.cast(inputs, dtype=tf.float32) * 1000.0 / self.tmax
+        emb = inputs[:, None] * self.emb[None, :]
+        emb = tf.concat([tf.sin(emb), tf.cos(emb)], axis=-1)
+        return emb
+
 
 def ResidualBlock(width, groups=8, activation_fn=keras.activations.swish):
     def apply(inputs):
@@ -194,96 +301,200 @@ def TimeMLP(units, activation_fn=keras.activations.swish):
     return apply
 
 
-# --- U-Net Model ---
+def build_naive_model(
+    img_size,
+    tmax,
+    cond_dim=128,
+    dense_dim=1024,
+    groups=8,
+):
+    image_input = layers.Input(shape=(img_size * img_size), name="image_input")
+    time_input = keras.Input(shape=(), dtype=tf.float32, name="time_input")
+    condition_input = keras.Input(shape=(cond_dim), dtype=tf.float32, name="condition_input")
 
-def build_unet_model(img_size, channels, widths, has_attention, tmax,
-                     cond_dim=128, num_res_blocks=2, norm_groups=8,
-                     first_channels=64):
-    image_input = layers.Input(shape=(img_size*img_size*channels,), name='image_input')
-    x = layers.Reshape((img_size, img_size, channels))(image_input)
-    time_input = layers.Input(shape=(), name='time_input', dtype=tf.float32)
-    cond_input = layers.Input(shape=(cond_dim,), name='condition_input')
+    temb = TimeEmbedding(dim=64, tmax=tmax)(time_input)
+    temb = TimeMLP(units=64, activation_fn="relu")(temb)
+    x = layers.Concatenate(axis=-1)([image_input, condition_input, temb])
 
-    # Initial conv
-    x0 = layers.Conv2D(first_channels, 3, padding='same', kernel_initializer=kernel_init(1.0))(x)
+    x = layers.Dense(dense_dim, activation="relu")(x)
+    z = layers.Dense(dense_dim)(x)
+    x = layers.Add()([x, z])
+    x = keras.activations.relu(x)
+    z = layers.Dense(dense_dim)(x)
+    x = layers.Add()([x, z])
+    x = keras.activations.relu(x)
+    z = layers.Dense(dense_dim)(x)
+    x = layers.Add()([x, z])
+    x = layers.Dense(img_size * img_size)(x)
 
-    # Time embedding
-    temb = TimeEmbedding(first_channels*4, tmax)(time_input)
-    temb = layers.Dense(first_channels*4, activation='swish')(temb)
-    temb = layers.Dense(first_channels*4)(temb)
-    temb = layers.Concatenate()([temb, cond_input])
-
-    # Down path
-    skips = [x0]
-    x = x0
-    for i, w in enumerate(widths):
-        for _ in range(num_res_blocks):
-            x = ResidualBlock(w, norm_groups)([x, temb])
-            if has_attention[i]: x = AttentionBlock(w, norm_groups)(x)
-            skips.append(x)
-        if i < len(widths)-1:
-            x = DownSample(width=w)(x)
-            skips.append(x)
-
-    # Middle
-    x = ResidualBlock(widths[-1], norm_groups)([x, temb])
-    x = AttentionBlock(widths[-1], norm_groups)(x)
-    x = ResidualBlock(widths[-1], norm_groups)([x, temb])
-
-    # Up path
-    for i in reversed(range(len(widths))):
-        for _ in range(num_res_blocks+1):
-            x = layers.Concatenate()([x, skips.pop()])
-            x = ResidualBlock(widths[i], norm_groups)([x, temb])
-            if has_attention[i]: x = AttentionBlock(widths[i], norm_groups)(x)
-        if i>0:
-            x = UpSample(widths[i])(x)
-
-    # Output conv
-    x = layers.GroupNormalization(norm_groups)(x)
-    x = layers.Activation('swish')(x)
-    x = layers.Conv2D(channels, 3, padding='same', kernel_initializer=kernel_init(0.0))(x)
-    out = layers.Flatten()(x)
-
-    model = keras.Model([image_input, cond_input, time_input], out, name='imagenet_unet')
-    model.latent_dim = img_size*img_size*channels
-    model.input_dim = img_size*img_size*channels
+    model = keras.Model([image_input, condition_input, time_input], x, name="naive")
+    model.latent_dim = img_size * img_size
+    model.input_dim = img_size * img_size
     model.condition_dim = cond_dim
     return model
 
-# --- Trainer Setup ---
 
-def build_trainer(args, forward_train=None):
-    img_size = args.img_size
-    channels = 3
+## Consistency Network - U-Net
+def build_unet_model(
+    img_size,
+    widths,
+    has_attention,
+    tmax,
+    cond_dim=128,
+    num_res_blocks=2,
+    norm_groups=8,
+    first_conv_channels=16,
+    interpolation="nearest",
+    activation_fn=keras.activations.swish,
+):
+    image_input = layers.Input(shape=(img_size * img_size,), name="image_input")
+    image = layers.Reshape((img_size, img_size, 1))(image_input)
+    time_input = keras.Input(shape=(), dtype=tf.float32, name="time_input")
+    condition_input = keras.Input(shape=(cond_dim,), dtype=tf.float32, name="condition_input")
+
+    x = layers.Conv2D(
+        first_conv_channels,
+        kernel_size=(3, 3),
+        padding="same",
+        kernel_initializer=kernel_init(1.0),
+    )(image)
+
+    temb = TimeEmbedding(dim=first_conv_channels * 4, tmax=tmax)(time_input)
+    temb = TimeMLP(units=first_conv_channels * 4, activation_fn=activation_fn)(temb)
+    temb = layers.Concatenate(axis=-1)([temb, condition_input])
+
+    skips = [x]
+
+    # DownBlock
+    for i in range(len(widths)):
+        for _ in range(num_res_blocks):
+            x = ResidualBlock(widths[i], groups=norm_groups, activation_fn=activation_fn)([x, temb])
+            if has_attention[i]:
+                x = AttentionBlock(widths[i], groups=norm_groups)(x)
+            skips.append(x)
+
+        if widths[i] != widths[-1]:
+            x = DownSample(widths[i])(x)
+            skips.append(x)
+
+    # MiddleBlock
+    x = ResidualBlock(widths[-1], groups=norm_groups, activation_fn=activation_fn)([x, temb])
+    x = AttentionBlock(widths[-1], groups=norm_groups)(x)
+    x = ResidualBlock(widths[-1], groups=norm_groups, activation_fn=activation_fn)([x, temb])
+
+    # UpBlock
+    for i in reversed(range(len(widths))):
+        for _ in range(num_res_blocks + 1):
+            x = layers.Concatenate(axis=-1)([x, skips.pop()])
+            x = ResidualBlock(widths[i], groups=norm_groups, activation_fn=activation_fn)([x, temb])
+            if has_attention[i]:
+                x = AttentionBlock(widths[i], groups=norm_groups)(x)
+
+        if i != 0:
+            x = UpSample(widths[i], interpolation=interpolation)(x)
+
+    # End block
+    x = layers.GroupNormalization(groups=norm_groups)(x)
+    x = activation_fn(x)
+    x = layers.Conv2D(1, (3, 3), padding="same", kernel_initializer=kernel_init(0.0))(x)
+    x = layers.Flatten()(x)
+    model = keras.Model([image_input, condition_input, time_input], x, name="unet")
+    model.latent_dim = img_size * img_size
+    model.input_dim = img_size * img_size
+    model.condition_dim = cond_dim
+    return model
+
+
+def build_summary_network(groups=8):
+    return tf.keras.models.Sequential(
+        [
+            tf.keras.layers.Conv2D(
+                filters=64,
+                kernel_size=(3, 3),
+                activation="relu",
+                kernel_initializer="he_normal",
+                input_shape=(28, 28, 1),
+                kernel_regularizer=tf.keras.regularizers.l2(1e-5),
+            ),
+            tf.keras.layers.GroupNormalization(groups=groups),
+            tf.keras.layers.Conv2D(
+                filters=64,
+                kernel_size=(3, 3),
+                activation="relu",
+                kernel_initializer="he_normal",
+                kernel_regularizer=tf.keras.regularizers.l2(1e-5),
+            ),
+            tf.keras.layers.GroupNormalization(groups=groups),
+            tf.keras.layers.Conv2D(
+                filters=128,
+                kernel_size=(3, 3),
+                activation="relu",
+                kernel_initializer="he_normal",
+                kernel_regularizer=tf.keras.regularizers.l2(1e-5),
+            ),
+            tf.keras.layers.GroupNormalization(groups=groups),
+            tf.keras.layers.Conv2D(
+                filters=128,
+                kernel_size=(3, 3),
+                activation="relu",
+                kernel_initializer="he_normal",
+                kernel_regularizer=tf.keras.regularizers.l2(1e-5),
+            ),
+            tf.keras.layers.GroupNormalization(groups=groups),
+            tf.keras.layers.GlobalAveragePooling2D(),
+        ]
+    )
+
+
+def build_trainer(checkpoint_path, args, forward_train=None):
+    summary_net = build_summary_network()
+    img_size = 28
+    input_dim = int(img_size * img_size)
     cond_dim = 128
 
-    # Build summary network
-    summary_net = keras.Sequential([
-        layers.Conv2D(64,3,activation='relu',padding='same', input_shape=(img_size,img_size,channels)),
-        layers.GroupNormalization(args.norm_groups),
-        layers.Conv2D(64,3,activation='relu',padding='same'),
-        layers.GroupNormalization(args.norm_groups),
-        layers.Conv2D(128,3,activation='relu',padding='same'),
-        layers.GroupNormalization(args.norm_groups),
-        layers.Conv2D(128,3,activation='relu',padding='same'),
-        layers.GroupNormalization(args.norm_groups),
-        layers.GlobalAveragePooling2D()
-    ])
+    tmax = args.tmax if args.method == "cmpe" else 1.0
 
-    # U-Net
-    widths = [64, 128, 256]
-    has_attention = [False, True, True]
-    unet = build_unet_model(img_size, channels, widths, has_attention,
-                            tmax=args.tmax, cond_dim=cond_dim,
-                            num_res_blocks=args.res_blocks,
-                            norm_groups=args.norm_groups,
-                            first_channels=args.base_channels)
+    if args.architecture == "unet":
+        norm_groups = 8  # Number of groups used in GroupNormalization layer
+        first_conv_channels = 16
+        channel_multiplier = [1, 2, 4]
+        widths = [first_conv_channels * mult for mult in channel_multiplier]
+        has_attention = [False, False, True]
+        num_res_blocks = 2  # Number of residual blocks
+        consistency_net = build_unet_model(
+            img_size=img_size,
+            widths=widths,
+            tmax=tmax,
+            has_attention=has_attention,
+            num_res_blocks=num_res_blocks,
+            norm_groups=norm_groups,
+            activation_fn=keras.activations.swish,
+        )
+    elif args.architecture == "naive":
+        consistency_net = build_naive_model(
+            img_size=img_size,
+            cond_dim=cond_dim,
+            dense_dim=args.dense_dim,
+            tmax=tmax,
+        )
 
+    if args.fine_tuning_summary == 1:
+        consistency_net.trainable = False
+
+
+    print("Trainable variables:")
+    for var in summary_net.trainable_variables:
+        print(var.name)
+
+    print("Frozen variables (consistency net):")
+    for var in consistency_net.trainable_variables:
+        if var.trainable:
+            print(f"Warning: {var.name} is unexpectedly trainable!")
     
+
     batch_size = args.batch_size
     num_steps = args.num_steps
-    initial_learning_rate = args.initial_learning_rate
+    initial_learning_rate = 5e-4
     if forward_train is not None:
         num_batches = np.ceil(forward_train["prior_draws"].shape[0] / batch_size)
         num_epochs = int(np.ceil(num_steps / num_batches))
@@ -291,26 +502,41 @@ def build_trainer(args, forward_train=None):
     else:
         num_epochs = 0
         num_steps = 0
-    
-    
-    if args.fine_tune_summary:
-        summary_net.trainable = False
 
+    if args.method == "cmpe":
+        sigma2 = args.sigma2
+        epsilon = args.epsilon
+        s0 = args.s0
+        s1 = args.s1
 
+        amortized_posterior = ConsistencyAmortizer(
+            consistency_net=consistency_net,
+            num_steps=num_steps,
+            summary_net=summary_net,
+            sigma2=sigma2,
+            eps=epsilon,
+            T_max=tmax,
+            s0=s0,
+            s1=s1,
+        )
 
-    amortizer = ConsistencyAmortizer(
-        consistency_net=unet,
-        summary_net=summary_net,
-        num_steps=args.num_steps,
-        sigma2=args.sigma2,
-        eps=args.epsilon,
-        T_max=args.tmax,
-        s0=args.s0,
-        s1=args.s1
-    )
+    elif args.method == "fmpe":
+        s0 = None
+        s1 = None
+        drift_net = GeneralDriftNetwork(consistency_net, input_dim)
 
-    trainer = Trainer(amortizer, configurator=configurator_masked,
-                      checkpoint_path=args.checkpoint_path)
+        amortized_posterior = RectifiedDistribution(
+            drift_net,
+            summary_net,
+        )
+    else:
+        raise ValueError(f"Method '{args.method}' not supported.")
+
+    os.makedirs(checkpoint_path, exist_ok=True)
+    with open(os.path.join(checkpoint_path, "args.pickle"), "wb") as f:
+        pickle.dump(args, f)
+
+    trainer = Trainer(amortized_posterior, configurator=configurator_masked, checkpoint_path=checkpoint_path)
 
     if forward_train is not None:
         # Optimizer
@@ -330,9 +556,8 @@ def build_trainer(args, forward_train=None):
 
     return trainer
 
-# --- Main Script ---
 
-if __name__=='__main__':
+if __name__ == "__main__":
     physical_devices = tf.config.list_physical_devices("GPU")
     if physical_devices:
         try:
@@ -342,47 +567,61 @@ if __name__=='__main__':
             pass
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--img-size', type=int, default=160)
-    parser.add_argument('--batch-size', type=int, default=64)
-    parser.add_argument('--initial-learning-rate', type=float, default=1e-4)
-    parser.add_argument('--num-steps', type=int, default=100000)
+    parser.add_argument("--initial-learning-rate", type=float, default=0.0001)
+    parser.add_argument("--batch-size", type=int, default=128)
+    parser.add_argument("--num-steps", type=int, default=40000)
     parser.add_argument("--num-training", type=int, default=60000)
+    parser.add_argument("--tmax", type=float, default=200)
     parser.add_argument("--lr-adapt", type=str, default="none", choices=["none", "cosine"])
-    parser.add_argument('--tmax', type=float, default=1000.0)
-    parser.add_argument('--epsilon', type=float, default=1e-3)
-    parser.add_argument('--s0', type=int, default=10)
-    parser.add_argument('--s1', type=int, default=50)
-    parser.add_argument('--sigma2', type=float, default=0.25)
-    parser.add_argument('--res-blocks', type=int, default=2)
-    parser.add_argument('--norm-groups', type=int, default=8)
-    parser.add_argument('--base-channels', type=int, default=64)
+    parser.add_argument("--epsilon", type=float, default=1e-3)
+    parser.add_argument("--s0", type=int, default=10)
+    parser.add_argument("--s1", type=int, default=50)
+    parser.add_argument("--sigma2", type=float, default=0.25)
     parser.add_argument("--optimizer", type=str, default="adamw")
-    parser.add_argument('--fine-tune-summary', action='store_true')
-    parser.add_argument('--checkpoint-path', type=str, default='checkpoints/imagenet-unet-ipainting')
     parser.add_argument("--method", type=str, default="cmpe", choices=["cmpe", "fmpe"])
     parser.add_argument("--architecture", type=str, default="unet", choices=["unet", "naive"])
+    # dense-dim for naive architecture
+    parser.add_argument("--dense-dim", type=int, default=1024)
+
+    parser.add_argument("--fine_tuning_summary", type=int, default=0)
+
     args = parser.parse_args()
+    # Load and split data
+    fashion_mnist = tf.keras.datasets.fashion_mnist
+    (train_images, train_labels), (test_images, test_labels) = fashion_mnist.load_data()
 
-    os.makedirs(args.checkpoint_path, exist_ok=True)
-    with open(os.path.join(args.checkpoint_path,'args.pkl'),'wb') as f:
-        pickle.dump(vars(args), f)
+    train_images = train_images[: args.num_training]
+    train_labels = train_labels[: args.num_training]
 
-    train_ds = load_imagenet(args.img_size, 'train')
-    val_ds   = load_imagenet(args.img_size, 'validation')
-    
-    forward_train = {'prior_draws': train_ds.numpy(),
-         'sim_data': train_ds.numpy()}
-    forward_val = {'prior_draws': val_ds.numpy(),
-                         'sim_data': val_ds.numpy()}
+    forward_train = {"prior_draws": train_images, "sim_data": train_images}
 
-    trainer, optimizer, num_epochs, batch_size = build_trainer(args, forward_train=forward_train)
+    # split into validation and test set
+    num_val = 500
+    perm = np.random.default_rng(seed=42).permutation(test_images.shape[0])
+
+    forward_val = {
+        "prior_draws": test_images[perm[:num_val]],
+        "sim_data": test_images[perm[:num_val]],
+    }
+
+    forward_test = {
+        "prior_draws": test_images[perm[num_val:]],
+        "sim_data": test_images[perm[num_val:]],
+    }
+
+    val_labels = test_labels[perm[:num_val]]
+    test_labels = test_labels[perm[num_val:]]
+    # checkpoint_path = os.path.join(
+    #     "checkpoints",
+    #     f"{args.method}-{args.architecture}-{args.num_training}-{datetime.datetime.today():%y-%m-%d-%H%M%S}",
+    # )
+
+    checkpoint_path = "checkpoints/cmpe-unet-2000-25-04-03-093413/"
+
+    trainer, optimizer, num_epochs, batch_size = build_trainer(checkpoint_path, args, forward_train=forward_train)
 
     print(f"Training for {num_epochs} epochs...")
 
-    trainer.train_offline(
-        forward_train,
-        optimizer=optimizer,
-        epochs=num_epochs,
-        batch_size=batch_size,
-        validation_sims=forward_val
+    h = trainer.train_offline(
+        forward_train, optimizer=optimizer, epochs=num_epochs, batch_size=batch_size, validation_sims=forward_val
     )

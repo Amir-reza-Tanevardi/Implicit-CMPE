@@ -2,7 +2,6 @@ absl-py==2.0.0
 aesara==2.9.3
 asttokens==2.4.1
 astunparse==1.6.3
--e git+https://github.com/stefanradev93/BayesFlow.git@dc653e448f40dfdef42e379131e5b2e99e4546ee#egg=bayesflow
 cachetools==5.3.2
 certifi==2023.7.22
 chardet==5.2.0
