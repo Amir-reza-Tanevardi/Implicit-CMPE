@@ -342,7 +342,7 @@ if __name__=='__main__':
             pass
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--img-size', type=int, default=160)
+    parser.add_argument('--img-size', type=int, default=128)
     parser.add_argument('--batch-size', type=int, default=64)
     parser.add_argument('--initial-learning-rate', type=float, default=1e-4)
     parser.add_argument('--num-steps', type=int, default=100000)
@@ -370,10 +370,27 @@ if __name__=='__main__':
     train_ds = load_imagenet(args.img_size, 'train')
     val_ds   = load_imagenet(args.img_size, 'validation')
     
-    forward_train = {'prior_draws': train_ds.numpy(),
-         'sim_data': train_ds.numpy()}
-    forward_val = {'prior_draws': val_ds.numpy(),
-                         'sim_data': val_ds.numpy()}
+    train_ds_unbatched = train_ds.take(args.num_training)
+    train_imgs = []
+    train_lbls = []
+    for img, lbl in train_ds_unbatched:
+        train_imgs.append(img.numpy())
+        train_lbls.append(lbl.numpy())
+    train_imgs = np.stack(train_imgs, axis=0)
+    train_lbls = np.stack(train_lbls, axis=0)
+
+    val_imgs = []
+    val_lbls = []
+    for img, lbl in val_ds:
+        val_imgs.append(img.numpy())
+        val_lbls.append(lbl.numpy())
+    val_imgs = np.stack(val_imgs, axis=0)
+    val_lbls = np.stack(val_lbls, axis=0)
+
+    forward_train = {'prior_draws': train_imgs,
+         'sim_data': train_imgs}
+    forward_val = {'prior_draws': val_imgs,
+                         'sim_data': val_imgs}
 
     trainer, optimizer, num_epochs, batch_size = build_trainer(args, forward_train=forward_train)
 
