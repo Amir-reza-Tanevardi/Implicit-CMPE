@@ -480,7 +480,7 @@ class ConsistencyAmortizer(AmortizedPosterior):
           deblurred_tensor : tf.Tensor of shape [batch_size, 784]
               Deblurred image tensor (flattened 28x28).
           """
-          size = 28
+          size = 32
           batch_size = tf.shape(blurred_tensor)[0]
 
           # Generate Gaussian PSF
@@ -506,10 +506,10 @@ class ConsistencyAmortizer(AmortizedPosterior):
           blurred_fft = tf.signal.fft2d(tf.cast(blurred_imgs, tf.complex64))
           deblurred_fft = blurred_fft * wiener_filter_tf
           deblurred_imgs = tf.math.real(tf.signal.ifft2d(deblurred_fft))
-          return tf.reshape(deblurred_imgs, [-1, 784])
+          return tf.reshape(deblurred_imgs, [-1, size*size])
 
 
-    def sample_implicit(self, input_dict, n_samples, n_steps=10, to_numpy=True, step_size=1e-3, **kwargs):
+    def sample_implicit(self, input_dict, n_samples, n_steps=10, to_numpy=True, step_size=1e-3, theta=50, **kwargs):
         """Generates random draws from the approximate posterior given a dictionary with conditonal variables
         using the multistep sampling algorithm (Algorithm 1).
 
@@ -544,8 +544,8 @@ class ConsistencyAmortizer(AmortizedPosterior):
         )
         n_data_sets, condition_dim = tf.shape(conditions)
 
-        conds = input_dict.get(defaults.DEFAULT_KEYS["summary_conditions"])
-        conds = self.deblur_gaussian_wiener(conds)
+        #conds = input_dict.get(defaults.DEFAULT_KEYS["summary_conditions"])
+        #conds = self.deblur_gaussian_wiener(conds)
 
         assert condition_dim == self.condition_dim
 
@@ -558,22 +558,24 @@ class ConsistencyAmortizer(AmortizedPosterior):
             discretized_time = tf.reverse(discretize_time(self.eps, self.T_max, n_steps), axis=[-1])
             z_init = tf.random.normal((n_samples, self.input_dim), stddev=self.T_max)
             T = discretized_time[0] + tf.zeros((n_samples, 1))
-            #x_n = z_init
-            t_n = discretized_time[0] 
-            t_nm1 = discretized_time[1]
+            x_n = z_init
+            #t_n = discretized_time[0] 
+            #t_nm1 = discretized_time[1]
 
             #sigma_nm1 = tf.math.sqrt( (t_nm1**2 * (t_n**2 - t_nm1**2))/(t_n**2) )
 
-            c1 = tf.math.sqrt( (t_nm1**2 )/(t_n**2) )
-            c2 = 1 - c1
+            #c1 = tf.math.sqrt( (t_nm1**2 )/(t_n**2) )
+            #c2 = 1 - c1
 
-            x_n = conds[i, None]
-            x_n = tf.concat([x_n] * n_samples, axis=0) + 0.1*z_init
+            #x_n = conds[i, None]
+            #x_n = tf.concat([x_n] * n_samples, axis=0) + 0.1*z_init
 
             
             samples = self.consistency_function(x_n, c_rep, T)
 
             eta = 0
+            #teta = 50
+            theta = tf.cast(theta, tf.float32)
         
             for n in range(1, n_steps):
                 z = tf.random.normal((n_samples, self.input_dim))
@@ -584,9 +586,17 @@ class ConsistencyAmortizer(AmortizedPosterior):
                 t_nm1 = discretized_time[n+1]
 
                 sigma_nm1 = eta * tf.math.sqrt( (t_nm1**2 * (t_n**2 - t_nm1**2))/(t_n**2) )
+                
+                s1 =  (theta  )*(t_nm1**2 - sigma_nm1**2)/(t_n**2)
+                s2 = (1  )*(t_nm1**2)/(t_n**2)
+                c1 = tf.math.sqrt( s1 )
+                c2 = tf.math.sqrt( 1 - s2 )
+                
+                # c1 = 50*tf.math.sqrt( s1 )
+                # c2 = tf.math.sqrt( 1 - s2 )
 
-                c1 = tf.math.sqrt( (t_nm1**2 - sigma_nm1**2)/(t_n**2) )
-                c2 = 1 - c1
+                # c1 = tf.math.sqrt( s1 )
+                # c2 = 1 - tf.math.sqrt(s2 )
 
                 x_nm1 = c1*x_n + c2*samples + (sigma_nm1) * z
 
@@ -606,6 +616,201 @@ class ConsistencyAmortizer(AmortizedPosterior):
             return post_samples.numpy()
         return post_samples
 
+
+    def sample_addim(self,
+           input_dict,
+           n_samples,
+           n_steps: int = 10,
+           theta = 0.9,
+           eta: float = 0.0,           # ← new hyperparameter
+           to_numpy: bool = True,
+           **kwargs):
+        """
+        DDIM / consistency‐model sampler following eq. (9) in your notes:
+
+            x_{t_{n-1}} = 
+              sqrt((t_{n-1}^2 - σ_{n-1}^2) / t_n^2) · x_{t_n}
+            + (1 - sqrt((t_{n-1}^2 - σ_{n-1}^2) / t_n^2)) · x₀_pred
+            + σ_{n-1} · z,       z∼N(0,I)
+
+        where σ_{n-1} = η · sqrt((t_n^2 − t_{n-1}^2)·t_{n-1}^2 / t_n^2).
+        """
+
+        # 1) compute conditioning
+        _, conditions = self._compute_summary_condition(
+            input_dict.get(defaults.DEFAULT_KEYS["summary_conditions"]),
+            input_dict.get(defaults.DEFAULT_KEYS["direct_conditions"]),
+            training=False,
+            **kwargs
+        )
+
+        conds = input_dict.get(defaults.DEFAULT_KEYS["summary_conditions"])
+        conds = self.deblur_gaussian_wiener(conds)
+        n_data, _ = tf.shape(conditions)
+        # 2) build the time‐grid t_N > … > t_0
+        ts = tf.reverse(discretize_time(self.eps, self.T_max, n_steps), axis=[-1])
+        # ts[n] = t_n.  ts[0] = T_max, ts[-1] = eps
+
+        d = float(self.input_dim)
+
+        out = []
+        for i in range(n_data):
+            c = conditions[i:i+1]                     # (1,cond_dim)
+            cond = conds                  # (1,cond_dim)
+            c_rep = tf.repeat(c, n_samples, axis=0)   # (n_samples, cond_dim)
+            cond_rep = tf.repeat(cond, n_samples, axis=0)   # (n_samples, input_dim)
+            #print(cond_rep.shape) 
+            # 3) sample initial x_{t_N} ∼ Normal(0, t_N^2 I)
+            t_N = ts[0]
+            x = tf.random.normal((n_samples, self.input_dim)) #* t_N
+
+            # 4) DDIM loop
+            for n in range(len(ts)-1):
+                t_n     = ts[n]     # current time
+                t_prev  = ts[n+1]   # next (smaller) time
+
+                t_p = 0.9*ts[n]
+
+                # ← predict clean x₀:
+                x0_pred = self.consistency_function(
+                    x, c_rep, 
+                    tf.fill((n_samples,1), t_n)
+                )
+                
+                s = tf.random.normal((n_samples, self.input_dim))
+                x = x0_pred + t_p * s
+
+                #print(x0_pred.shape)
+
+                # calculate x_var
+
+                x_var = tf.reduce_sum((tf.reshape(cond_rep, (n_samples, 3*32*32)) - x0_pred)**2, axis=1, keepdims=True) / d
+                #x_var = 0.1 /(2 + t_p**2)
+                #print(f"x_var: {x_var}")
+                # ← compute σ_{n-1} and the “α” coefficient a = sqrt((t_prev² − σ²)/t_n²)
+                sigma = eta * tf.sqrt(
+                    (t_p**2 - t_prev**2) * (t_prev**2) / (t_p**2)
+                )
+                a = tf.sqrt((t_prev**2 - sigma**2) / (t_p**2))
+                #print(f"a: {a}")
+                # ← the DDIM mean:
+                err = (x - x0_pred)
+                
+                norm2 = tf.reduce_sum(err**2, axis=1, keepdims=True)
+                #if n == len(ts)-2:
+                #  err_coef = 0
+                #else:
+                err_coef = 0.90*tf.sqrt(a**2 + 1.0*x_var*((1-a))/norm2)#*((1-a)**2)/(norm2))#*((1.0 - a)**2)/norm2) 
+                #err_coef = 5.90*tf.sqrt(a**2 + 1.0*x_var*((a))/norm2)#*((1-a)**2)/(norm2))#*((1.0 - a)**2)/norm2) 
+                #err_coef = a
+                
+                #print(f"err_coef2: {err_coef2}")
+                #print(f"err_coef: {err_coef}")
+                #print(f"ration: {err_coef2/err_coef}")
+
+                #print(f"a: {a}")
+
+                x_mean = x0_pred + err_coef * err
+                #x_mean = a * x + (1.0 - a) * x0_pred
+
+                # ← add noise (if η>0)
+                if eta > 0:
+                    z = tf.random.normal((n_samples, self.input_dim))
+                    x = x_mean + sigma * z
+                else:
+                    x = x_mean
+
+            out.append(x)
+
+        # stack and possibly squeeze
+        post = tf.stack(out, axis=0)  # (n_data, n_samples, input_dim)
+        if n_data == 1:
+            post = tf.squeeze(post, 0)
+
+        return post.numpy() if to_numpy else post
+        
+
+    def sample_addim2(self,
+           input_dict,
+           n_samples,
+           n_steps: int = 10,
+           eta: float = 0.99,           # ← new hyperparameter
+           to_numpy: bool = True,
+           **kwargs):
+        """
+        DDIM / consistency‐model sampler following eq. (9) in your notes:
+
+            x_{t_{n-1}} = 
+              sqrt((t_{n-1}^2 - σ_{n-1}^2) / t_n^2) · x_{t_n}
+            + (1 - sqrt((t_{n-1}^2 - σ_{n-1}^2) / t_n^2)) · x₀_pred
+            + σ_{n-1} · z,       z∼N(0,I)
+
+        where σ_{n-1} = η · sqrt((t_n^2 − t_{n-1}^2)·t_{n-1}^2 / t_n^2).
+        """
+
+        # 1) compute conditioning
+        _, conditions = self._compute_summary_condition(
+            input_dict.get(defaults.DEFAULT_KEYS["summary_conditions"]),
+            input_dict.get(defaults.DEFAULT_KEYS["direct_conditions"]),
+            training=False,
+            **kwargs
+        )
+        n_data, _ = tf.shape(conditions)
+
+        # 2) build the time‐grid t_N > … > t_0
+        ts = tf.reverse(discretize_time(self.eps, self.T_max, n_steps), axis=[-1])
+        # ts[n] = t_n.  ts[0] = T_max, ts[-1] = eps
+
+        out = []
+        for i in range(n_data):
+            c = conditions[i:i+1]                     # (1,cond_dim)
+            c_rep = tf.repeat(c, n_samples, axis=0)   # (n_samples, cond_dim)
+
+            # 3) sample initial x_{t_N} ∼ Normal(0, t_N^2 I)
+            t_N = ts[0]
+            x = tf.random.normal((n_samples, self.input_dim)) #* t_N
+
+            # 4) DDIM loop
+            for n in range(len(ts)-1):
+                t_n     = ts[n]     # current time
+                t_prev  = ts[n+1]   # next (smaller) time
+                t_p = 0.9*ts[n]
+
+                # ← predict clean x₀:
+                x0_pred = self.consistency_function(
+                    x, c_rep, 
+                    tf.fill((n_samples,1), t_n)
+                )
+                
+                s = tf.random.normal((n_samples, self.input_dim))
+                x = x0_pred + t_p * s
+
+                # ← compute σ_{n-1} and the “α” coefficient a = sqrt((t_prev² − σ²)/t_n²)
+                sigma = eta * tf.sqrt(
+                    (t_p**2 - t_prev**2) * (t_prev**2) / (t_p**2)
+                )
+                a = tf.sqrt((t_prev**2 - sigma**2) / (t_p**2))
+
+                # ← the DDIM mean:
+                x_mean = a * x + (1.0 - a) * x0_pred
+
+                # ← add noise (if η>0)
+                if eta > 0:
+                    z = tf.random.normal((n_samples, self.input_dim))
+                    x = x_mean + sigma * z
+                else:
+                    x = x_mean
+
+            out.append(x)
+
+        # stack and possibly squeeze
+        post = tf.stack(out, axis=0)  # (n_data, n_samples, input_dim)
+        if n_data == 1:
+            post = tf.squeeze(post, 0)
+
+        return post.numpy() if to_numpy else post
+
+      
     def sample(self, input_dict, n_samples, n_steps=10, to_numpy=True, step_size=1e-3, **kwargs):
         """Generates random draws from the approximate posterior given a dictionary with conditonal variables
         using the multistep sampling algorithm (Algorithm 1).
@@ -670,7 +875,8 @@ class ConsistencyAmortizer(AmortizedPosterior):
 
     def _compute_summary_condition(self, summary_conditions, direct_conditions, **kwargs):
         """Determines how to concatenate the provided conditions."""
-
+        
+        #s = summary_conditions
         # Compute learnable summaries, if given
         if self.summary_net is not None:
             sum_condition = self.summary_net(summary_conditions, **kwargs)
@@ -686,7 +892,7 @@ class ConsistencyAmortizer(AmortizedPosterior):
             full_cond = direct_conditions
         else:
             raise SummaryStatsError("Could not concatenarte or determine conditioning inputs...")
-        return sum_condition, full_cond
+        return sum_condition, full_cond 
 
     def _determine_summary_loss(self, loss_fun):
         """Determines which summary loss to use if default `None` argument provided, otherwise return identity."""

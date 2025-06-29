@@ -16,6 +16,8 @@ import pickle
 import timeit
 
 import tensorflow_datasets as tfds
+from argparse import Namespace
+
 
 import bayesflow as bf
 import matplotlib
@@ -25,7 +27,7 @@ import seaborn as sns
 import tensorflow as tf
 from bayesflow.computational_utilities import maximum_mean_discrepancy
 from tqdm.autonotebook import tqdm
-from train import build_trainer, configurator_blurred
+from train_cifar_denoising import build_trainer, configurator_blurred
 
 physical_devices = tf.config.list_physical_devices("GPU")
 if physical_devices:
@@ -127,18 +129,18 @@ def to_id(method, architecture, num_train):
     return f"{method}-{architecture}-{num_train}"
 
 checkpoint_path_dict = {
-    to_id("cmpe", "unet", 2000): "checkpoints/cifar10-deblurring-cmpe-unet-2000-25-04-03-093413/",
+    to_id("cmpe", "unet", 2000): "checkpoints/cifar10-deblurring-cmpe-unet-20000-25-06-29-080038/",
     #to_id("cmpe", "unet", 60000): "checkpoints/cmpe-unet-60000-25-04-10-150038/",
 }
 
 arg_dict = {}
 for key, checkpoint_path in checkpoint_path_dict.items():
-    with open(os.path.join(checkpoint_path, "args.pickle"), "rb") as f:
+    with open(os.path.join(checkpoint_path, "args.pkl"), "rb") as f:
         arg_dict[key] = pickle.load(f)
 
 trainer_dict = {}
 for key, checkpoint_path in checkpoint_path_dict.items():
-    trainer_dict[key] = build_trainer(checkpoint_path, arg_dict[key])
+    trainer_dict[key] = build_trainer(checkpoint_path, Namespace(**arg_dict[key]))
 
 for key, trainer in trainer_dict.items():
     fig_dir = f"figures/{key}"
@@ -242,19 +244,19 @@ def create_mean_std_plots(
         f.savefig(filepath, dpi=300, bbox_inches="tight")
     return f
 
-for key, trainer in trainer_dict.items():
-    print(key)
-    fig_dir = f"figures/{key}"
-    os.makedirs(fig_dir, exist_ok=True)
-    f = create_mean_std_plots(
-        trainer,
-        seed=42,
-        filepath=os.path.join(fig_dir, "main.pdf"),
-        method=arg_dict[key].method,
-        cmpe_steps=cmpe_steps,
-        fmpe_step_size=fmpe_step_size,
-        image_size = img_size
-    )
+# for key, trainer in trainer_dict.items():
+#     print(key)
+#     fig_dir = f"figures/{key}"
+#     os.makedirs(fig_dir, exist_ok=True)
+#     f = create_mean_std_plots(
+#         trainer,
+#         seed=42,
+#         filepath=os.path.join(fig_dir, "main.pdf"),
+#         method=Namespace(**arg_dict[key]).method,
+#         cmpe_steps=cmpe_steps,
+#         fmpe_step_size=fmpe_step_size,
+#         image_size = img_size
+#     )
 
 """## Per-Class Generation: Samples"""
 
@@ -276,15 +278,15 @@ def create_sample_plots(trainer, seed=42, filepath=None, cmpe_steps=30, fmpe_ste
 
         # Obtain samples and clip to prior range, instead of rejecting
         if method == "cmpe":
-            samples = trainer.amortizer.sample(inp, n_steps=cmpe_steps, n_samples=n_samples)
+            samples = trainer.amortizer.sample_addim(inp, n_steps=cmpe_steps, n_samples=n_samples)
         else:
             samples = trainer.amortizer.sample(inp, n_samples=n_samples, step_size=fmpe_step_size)
         samples = np.clip(samples, a_min=-1.01, a_max=1.01)
 
         # Plot truth and blurred
-        axarr[0,i].imshow((inp["parameters"].reshape(image_size,image_size,3)+1)/2)
-        axarr[1,i].imshow((inp["summary_conditions"].reshape(image_size,image_size,3)+1)/2)
-        axarr[2,i].imshow((samples.mean(0).reshape(image_size,image_size,3)+1)/2)
+        axarr[i,0].imshow((inp["parameters"].reshape(image_size,image_size,3)+1)/2)
+        axarr[i,1].imshow((inp["summary_conditions"].reshape(image_size,image_size,3)+1)/2)
+        axarr[i,2].imshow((samples.mean(0).reshape(image_size,image_size,3)+1)/2)
         for j in range(n_samples):
             axarr[i, 2 + j].imshow((samples[j].reshape(image_size,image_size,3)+1)/2)
 
@@ -318,7 +320,7 @@ for key, trainer in trainer_dict.items():
         trainer,
         seed=42,
         filepath=os.path.join(fig_dir, "samples_main.pdf"),
-        method=arg_dict[key].method,
+        method=Namespace(**arg_dict[key]).method,
         cmpe_steps=cmpe_steps,
         fmpe_step_size=fmpe_step_size,
         image_size = img_size
@@ -372,7 +374,7 @@ for key, trainer in trainer_dict.items():
     # sample once, to avoid contaminating timing with tracing
     c = conf["summary_conditions"][0, None]
     print(f" Initializing...")
-    if arg_dict[key].method == "cmpe":
+    if Namespace(**arg_dict[key]).method == "cmpe":
         trainer.amortizer.sample({"summary_conditions": c}, n_steps=cmpe_steps, n_samples=n_samples)
     
     for theta in np.linspace(3,3,1):
@@ -383,14 +385,14 @@ for key, trainer in trainer_dict.items():
         for i in range(n_datasets):
             print(f"{i+1:03}/{n_datasets}", end="\r")
             c = conf["summary_conditions"][i, None]
-            if arg_dict[key].method == "cmpe":
+            if Namespace(**arg_dict[key]).method == "cmpe":
                 post_samples[i] = trainer.amortizer.sample(
                     {"summary_conditions": c}, n_steps=cmpe_steps, n_samples=n_samples
                 )
 
             # Ground truth
             true_param = parameters[i]
-            true_img = render_from_params(true_param)     # (160, 160, 3), [0,1]   # <<< EDITED
+            true_img = render_from_params(true_param, img_size)     # (160, 160, 3), [0,1]   # <<< EDITED
             true_tensor = TF.to_tensor(true_img).unsqueeze(0)              # shape (1,3,160,160)  # <<< EDITED
             # KID/Inception expects 299×299 uint8
             true_tensor_299 = F.interpolate(
@@ -422,7 +424,7 @@ for key, trainer in trainer_dict.items():
 
                 # Image-level metrics on [0,1]
                 psnr = peak_signal_noise_ratio(true_img, recon_img, data_range=1.0)
-                ssim = structural_similarity(true_img, recon_img, multichannel=True, data_range=1.0)
+                ssim = structural_similarity(true_img, recon_img, multichannel=True, data_range=1.0, channel_axis=2)
                 mse  = mean_squared_error(true_img, recon_img)
 
                 # LPIPS on 64×64 float in [-1,1]
