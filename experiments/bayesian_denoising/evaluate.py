@@ -23,7 +23,7 @@ import seaborn as sns
 import tensorflow as tf
 from bayesflow.computational_utilities import maximum_mean_discrepancy
 from tqdm.autonotebook import tqdm
-from train import build_trainer, configurator
+from train import build_trainer, configurator, configurator_masked
 
 physical_devices = tf.config.list_physical_devices("GPU")
 if physical_devices:
@@ -92,6 +92,7 @@ def to_id(method, architecture, num_train):
 
 checkpoint_path_dict = {
     to_id("cmpe", "unet", 2000): "checkpoints/cmpe-unet-2000-25-04-03-093413/",
+    #to_id("cmpe", "unet", 2000): "checkpoints/cmpe-unet-2000-25-16-04-099999/",
     #to_id("cmpe", "unet", 60000): "checkpoints/cmpe-unet-60000-25-04-10-150038/",
 }
 
@@ -129,31 +130,31 @@ conf = configurator(forward_test)
 
 """## Per-Class Generation: Means and STDs"""
 
-# class_names = [
-#     "T-Shirt/Top",
-#     "Trouser",
-#     "Pullover",
-#     "Dress",
-#     "Coat",
-#     "Sandal",
-#     "Shirt",
-#     "Sneaker",
-#     "Bag",
-#     "Ankle Boot",
-# ]
+class_names = [
+    "T-Shirt/Top",
+    "Trouser",
+    "Pullover",
+    "Dress",
+    "Coat",
+    "Sandal",
+    "Shirt",
+    "Sneaker",
+    "Bag",
+    "Ankle Boot",
+]
 
-# y_labels = [r"Parameter $\theta$", r"Observation $x$", "Mean", "Std.Dev"]
+y_labels = [r"Parameter $\theta$", r"Observation $x$", "Mean", "Std.Dev"]
 
-# def random_indices_per_class(labels, seed=42):
-#     out = {}
-#     unique = np.unique(labels)
-#     perm = np.random.default_rng(seed).permutation(labels.shape[0])
-#     for i in unique:
-#         for idx in perm:
-#             if i == labels[idx]:
-#                 out[i] = idx
-#                 break
-#     return out
+def random_indices_per_class(labels, seed=42):
+    out = {}
+    unique = np.unique(labels)
+    perm = np.random.default_rng(seed).permutation(labels.shape[0])
+    for i in unique:
+        for idx in perm:
+            if i == labels[idx]:
+                out[i] = idx
+                break
+    return out
 
 
 # def create_mean_std_plots(
@@ -223,75 +224,75 @@ conf = configurator(forward_test)
 #         fmpe_step_size=fmpe_step_size,
 #     )
 
-# """## Per-Class Generation: Samples"""
+"""## Per-Class Generation: Samples"""
 
-# def create_sample_plots(trainer, seed=42, filepath=None, cmpe_steps=30, fmpe_step_size=1 / 248, method=""):
-#     """Helper function for displaying Figure 7 in main paper.
-#     Default seed is the one and only 42!
-#     """
+def create_sample_plots(trainer, seed=42, filepath=None, cmpe_steps=30, fmpe_step_size=1 / 248, method=""):
+    """Helper function for displaying Figure 7 in main paper.
+    Default seed is the one and only 42!
+    """
 
-#     idx_dict = random_indices_per_class(test_labels, seed=seed)
-#     n_samples = 5
-#     f, axarr = plt.subplots(len(idx_dict), 2 + n_samples, figsize=(8.27, 11.69))
-#     titles = [r"Param. $\theta$", r"Obs. $x$"] + n_samples * ["Sample"]
-#     for i, (c, idx) in tqdm(enumerate(idx_dict.items()), total=len(idx_dict)):
-#         # Prepare input dict for network
-#         inp = {
-#             "parameters": conf["parameters"][idx : (idx + 1)],
-#             "summary_conditions": conf["summary_conditions"][idx : (idx + 1)],
-#         }
+    idx_dict = random_indices_per_class(test_labels, seed=seed)
+    n_samples = 5
+    f, axarr = plt.subplots(len(idx_dict), 2 + n_samples, figsize=(8.27, 11.69))
+    titles = [r"Param. $\theta$", r"Obs. $x$"] + n_samples * ["Sample"]
+    for i, (c, idx) in tqdm(enumerate(idx_dict.items()), total=len(idx_dict)):
+        # Prepare input dict for network
+        inp = {
+            "parameters": conf["parameters"][idx : (idx + 1)],
+            "summary_conditions": conf["summary_conditions"][idx : (idx + 1)],
+        }
 
-#         # Obtain samples and clip to prior range, instead of rejecting
-#         if method == "cmpe":
-#             samples = trainer.amortizer.sample(inp, n_steps=cmpe_steps, n_samples=n_samples)
-#         else:
-#             samples = trainer.amortizer.sample(inp, n_samples=n_samples, step_size=fmpe_step_size)
-#         samples = np.clip(samples, a_min=-1.01, a_max=1.01)
+        # Obtain samples and clip to prior range, instead of rejecting
+        if method == "cmpe":
+            samples = trainer.amortizer.sample_addim(inp, n_steps=cmpe_steps, n_samples=n_samples)
+        else:
+            samples = trainer.amortizer.sample(inp, n_samples=n_samples, step_size=fmpe_step_size)
+        samples = np.clip(samples, a_min=-1.01, a_max=1.01)
 
-#         # Plot truth and blurred
-#         axarr[i, 0].imshow(inp["parameters"].reshape((28, 28, 1)), cmap=matplotlib.colormaps["binary"])
-#         axarr[i, 1].imshow(
-#             inp["summary_conditions"].reshape((28, 28, 1)),
-#             cmap=matplotlib.colormaps["binary"],
-#         )
-#         for j in range(n_samples):
-#             axarr[i, 2 + j].imshow(samples[j].reshape(28, 28, 1), cmap=matplotlib.colormaps["binary"])
+        # Plot truth and blurred
+        axarr[i, 0].imshow(inp["parameters"].reshape((28, 28, 1)), cmap=matplotlib.colormaps["binary"])
+        axarr[i, 1].imshow(
+            inp["summary_conditions"].reshape((28, 28, 1)),
+            cmap=matplotlib.colormaps["binary"],
+        )
+        for j in range(n_samples):
+            axarr[i, 2 + j].imshow(samples[j].reshape(28, 28, 1), cmap=matplotlib.colormaps["binary"])
 
-#         axarr[i, 0].set_ylabel(class_names[i], fontsize=12)
+        axarr[i, 0].set_ylabel(class_names[i], fontsize=12)
 
-#     for i, title in enumerate(titles):
-#         axarr[0, i].set_title(title, fontsize=12)
+    for i, title in enumerate(titles):
+        axarr[0, i].set_title(title, fontsize=12)
 
-#     # get rid of axis
-#     for ax in axarr.flat:
-#         ax.spines["right"].set_visible(False)
-#         ax.spines["left"].set_visible(False)
-#         ax.spines["top"].set_visible(False)
-#         ax.spines["bottom"].set_visible(False)
-#         ax.set_yticklabels([])
-#         ax.set_yticks([])
-#         ax.set_xticklabels([])
-#         ax.set_xticks([])
-#     f.tight_layout()
+    # get rid of axis
+    for ax in axarr.flat:
+        ax.spines["right"].set_visible(False)
+        ax.spines["left"].set_visible(False)
+        ax.spines["top"].set_visible(False)
+        ax.spines["bottom"].set_visible(False)
+        ax.set_yticklabels([])
+        ax.set_yticks([])
+        ax.set_xticklabels([])
+        ax.set_xticks([])
+    f.tight_layout()
 
-#     if filepath is not None:
-#         f.savefig(filepath, dpi=300, bbox_inches="tight")
-#         pass
-#     return f
+    if filepath is not None:
+        f.savefig(filepath, dpi=300, bbox_inches="tight")
+        pass
+    return f
 
-# for key, trainer in trainer_dict.items():
-#     print(key)
-#     fig_dir = f"figures/{key}"
-#     os.makedirs(fig_dir, exist_ok=True)
-#     f = create_sample_plots(
-#         trainer,
-#         seed=42,
-#         filepath=os.path.join(fig_dir, "samples_main.pdf"),
-#         method=arg_dict[key].method,
-#         cmpe_steps=cmpe_steps,
-#         fmpe_step_size=fmpe_step_size,
-#     )
-#     f.show()
+for key, trainer in trainer_dict.items():
+    print(key)
+    fig_dir = f"figures/{key}"
+    os.makedirs(fig_dir, exist_ok=True)
+    f = create_sample_plots(
+        trainer,
+        seed=42,
+        filepath=os.path.join(fig_dir, "samples_main.pdf"),
+        method=arg_dict[key].method,
+        cmpe_steps=cmpe_steps,
+        fmpe_step_size=fmpe_step_size,
+    )
+    f.show()
 
 # """### Averaged RMSE"""
 
@@ -308,7 +309,7 @@ conf = configurator(forward_test)
 #     if arg_dict[key].method == "cmpe":
 #         trainer.amortizer.sample_implicit({"summary_conditions": c}, n_steps=cmpe_steps, n_samples=n_samples)
 #     else:
-#         trainer.amortizer.sample_implicit({"summary_conditions": c}, n_samples=n_samples, step_size=fmpe_step_size)
+#         trainer.amortizer.sample({"summary_conditions": c}, n_samples=n_samples, step_size=fmpe_step_size)
 
 #     # store samples
 #     post_samples = np.zeros((n_datasets, n_samples, conf["parameters"].shape[-1]))
@@ -345,71 +346,191 @@ conf = configurator(forward_test)
 
 # bf.computational_utilities.aggregated_rmse(parameters, conf["summary_conditions"][:n_datasets, None])
 
-"""### MMD
+# """### MMD
 
-Split the training images into six parts (due to memory limits) and calculate the maximum mean discrepancy.
-"""
+# Split the training images into six parts (due to memory limits) and calculate the maximum mean discrepancy.
+# """
 
-import tensorflow as tf
+# import tensorflow as tf
 
-def maximum_mean_discrepancy1(x, y, sigma=1.0):
+# def maximum_mean_discrepancy1(x, y, sigma=1.0):
+#     """
+#     Computes Maximum Mean Discrepancy (MMD) using an RBF kernel.
+#     Inputs must be tf.float32.
+#     """
+
+#     x = tf.cast(x, tf.float32)
+#     y = tf.cast(y, tf.float32)
+
+#     def rbf_kernel(a, b, sigma):
+#         norm_a = tf.reduce_sum(tf.square(a), axis=1, keepdims=True)
+#         norm_b = tf.reduce_sum(tf.square(b), axis=1, keepdims=True)
+#         dists = norm_a - 2 * tf.matmul(a, b, transpose_b=True) + tf.transpose(norm_b)
+#         return tf.exp(-dists / (2.0 * sigma ** 2))
+
+#     #x = tf.squeeze(x, axis=1)
+#     #y = tf.squeeze(y, axis=1) 
+#     K_xx = rbf_kernel(x, x, sigma)
+#     K_yy = rbf_kernel(y, y, sigma)
+#     K_xy = rbf_kernel(x, y, sigma)
+
+#     n = tf.cast(tf.shape(x)[0], tf.float32)
+
+#     mmd = tf.reduce_sum(K_xx) / (n * n) + tf.reduce_sum(K_yy) / (n * n) - 2 * tf.reduce_sum(K_xy) / (n * n)
+#     return mmd
+
+
+# n = 9000
+# parameters = conf["parameters"][:n, None]
+# #c  = conf["summary_conditions"][:100, None]
+# split_size = 100
+
+# p_samples = np.zeros((n , 1,conf["parameters"].shape[-1]))
+
+# for key, trainer in trainer_dict.items():
+#     print(f'key: {key}')
+
+#     if arg_dict[key].method == "cmpe":
+#       for i in range(n):
+#         #print("Here")
+#         c  = conf["summary_conditions"][i, None]
+#         p_samples[i] = trainer.amortizer.sample_implicit({"summary_conditions": c}, n_steps=cmpe_steps, n_samples=1, to_numpy=False)
+#     # else: 
+#     #    samples = trainer.amortizer.sample(conf, n_samples=1, step_size=fmpe_step_size, to_numpy=False)
+#     mmds = np.zeros((90,))
+#     for i in range(90):
+#         # print(i)
+#         # print(f'p_sampels.shape: {p_samples.shape}')
+#         # print(f'parameters.shape: {parameters.shape}')
+#         x = parameters[(i * split_size) : ((i + 1) * split_size)]
+#         y = p_samples[(i * split_size) : ((i + 1) * split_size), 0]
+
+#         x = tf.reshape(x, [split_size, -1])
+#         y = tf.reshape(y, [split_size, -1])
+
+#         mmds[i] = maximum_mean_discrepancy1(x, y)
+
+#     output_dir = f"evaluation/{key}"
+#     os.makedirs(output_dir, exist_ok=True)
+#     np.save(os.path.join(output_dir, "mmds.npy"), mmds)
+#     print(f"{mmds.mean():.5f}, std: {mmds.std():.5f}")
+
+
+
+##############################
+### New Metrics
+##############################
+
+
+from skimage.metrics import peak_signal_noise_ratio, structural_similarity, mean_squared_error
+import torchvision.transforms.functional as TF
+import torch
+import lpips
+import numpy as np
+import os
+import timeit
+import torch.nn.functional as F
+from torchmetrics.image.kid import KernelInceptionDistance
+
+# Initialize LPIPS metric
+lpips_metric = lpips.LPIPS(net='alex')  # Pretrained LPIPS model
+
+# Initialize KID metric
+kid_metric = KernelInceptionDistance(subset_size=50)
+
+all_psnr = []
+all_ssim = []
+all_lpips = []
+all_mses = []
+
+n_samples = 1
+n_datasets = 1000
+parameters = conf["parameters"][:n_datasets]
+
+def render_from_params(param_vector):
     """
-    Computes Maximum Mean Discrepancy (MMD) using an RBF kernel.
-    Inputs must be tf.float32.
+    Reshape a flattened parameter vector into a (28, 28) image.
+    Assumes input is a 1D array of shape (784,).
     """
-
-    x = tf.cast(x, tf.float32)
-    y = tf.cast(y, tf.float32)
-
-    def rbf_kernel(a, b, sigma):
-        norm_a = tf.reduce_sum(tf.square(a), axis=1, keepdims=True)
-        norm_b = tf.reduce_sum(tf.square(b), axis=1, keepdims=True)
-        dists = norm_a - 2 * tf.matmul(a, b, transpose_b=True) + tf.transpose(norm_b)
-        return tf.exp(-dists / (2.0 * sigma ** 2))
-
-    #x = tf.squeeze(x, axis=1)
-    #y = tf.squeeze(y, axis=1) 
-    K_xx = rbf_kernel(x, x, sigma)
-    K_yy = rbf_kernel(y, y, sigma)
-    K_xy = rbf_kernel(x, y, sigma)
-
-    n = tf.cast(tf.shape(x)[0], tf.float32)
-
-    mmd = tf.reduce_sum(K_xx) / (n * n) + tf.reduce_sum(K_yy) / (n * n) - 2 * tf.reduce_sum(K_xy) / (n * n)
-    return mmd
-
-
-n = 9000
-parameters = conf["parameters"][:n, None]
-#c  = conf["summary_conditions"][:100, None]
-split_size = 100
-
-p_samples = np.zeros((n , 1,conf["parameters"].shape[-1]))
+    return param_vector.reshape(28, 28)
 
 for key, trainer in trainer_dict.items():
-    print(f'key: {key}')
+    print(key, end="")
 
+    # sample once, to avoid contaminating timing with tracing
+    c = conf["summary_conditions"][0, None]
+    print(f" Initializing...")
     if arg_dict[key].method == "cmpe":
-      for i in range(n):
-        #print("Here")
-        c  = conf["summary_conditions"][i, None]
-        p_samples[i] = trainer.amortizer.sample_implicit({"summary_conditions": c}, n_steps=cmpe_steps, n_samples=1, to_numpy=False)
-    # else: 
-    #    samples = trainer.amortizer.sample(conf, n_samples=1, step_size=fmpe_step_size, to_numpy=False)
-    mmds = np.zeros((90,))
-    for i in range(90):
-        # print(i)
-        # print(f'p_sampels.shape: {p_samples.shape}')
-        # print(f'parameters.shape: {parameters.shape}')
-        x = parameters[(i * split_size) : ((i + 1) * split_size)]
-        y = p_samples[(i * split_size) : ((i + 1) * split_size), 0]
+        trainer.amortizer.sample_addim({"summary_conditions": c}, n_steps=cmpe_steps, n_samples=n_samples)
+    
+    for theta in np.linspace(3,3,1):
+        # store samples
+        post_samples = np.zeros((n_datasets, n_samples, conf["parameters"].shape[-1]))
 
-        x = tf.reshape(x, [split_size, -1])
-        y = tf.reshape(y, [split_size, -1])
+        tic = timeit.default_timer()
+        for i in range(n_datasets):
+            print(f"{i+1:03}/{n_datasets}", end="\r")
+            c = conf["summary_conditions"][i, None]
+            if arg_dict[key].method == "cmpe":
+                post_samples[i] = trainer.amortizer.sample_addim(
+                    {"summary_conditions": c}, n_steps=cmpe_steps, n_samples=n_samples#, theta=theta
+                )
 
-        mmds[i] = maximum_mean_discrepancy1(x, y)
+            # Ground truth
+            true_param = parameters[i]
+            true_img = render_from_params(true_param)  # (28, 28)
+            true_tensor = TF.to_tensor(true_img).repeat(3, 1, 1).unsqueeze(0) * 2 - 1
+            true_tensor_299 = F.interpolate(
+                ((true_tensor + 1) * 127.5).clamp(0, 255), size=(299, 299), mode='bilinear', align_corners=False
+            ).to(torch.uint8)
 
-    output_dir = f"evaluation/{key}"
-    os.makedirs(output_dir, exist_ok=True)
-    np.save(os.path.join(output_dir, "mmds.npy"), mmds)
-    print(f"{mmds.mean():.5f}, std: {mmds.std():.5f}")
+
+
+            # Accumulate metrics across samples
+            sample_psnr = []
+            sample_ssim = []
+            sample_lpips = []
+            sample_mse = []
+
+            for j in range(n_samples):
+                recon_img = render_from_params(post_samples[i, j])
+                recon_tensor = TF.to_tensor(recon_img).repeat(3, 1, 1).unsqueeze(0) * 2 - 1
+                recon_tensor_299 = F.interpolate(
+                    ((recon_tensor + 1) * 127.5).clamp(0, 255), size=(299, 299), mode='bilinear', align_corners=False
+                ).to(torch.uint8)
+                # Add to KID (distribution-level comparison)
+                kid_metric.update(true_tensor_299, real=True)
+                kid_metric.update(recon_tensor_299, real=False)
+
+                # Image-level metrics
+                psnr = peak_signal_noise_ratio(true_img, recon_img, data_range=1.0)
+                ssim = structural_similarity(true_img, recon_img, data_range=1.0)
+                mse = mean_squared_error(true_img, recon_img)
+
+                img1_lpips = F.interpolate(recon_tensor, size=(64, 64), mode='bilinear', align_corners=False).float()
+                img2_lpips = F.interpolate(true_tensor, size=(64, 64), mode='bilinear', align_corners=False).float()
+                lp = lpips_metric(img1_lpips, img2_lpips).item()
+
+                sample_psnr.append(psnr)
+                sample_ssim.append(ssim)
+                sample_lpips.append(lp)
+                sample_mse.append(mse)
+
+            # Average over all posterior samples for this dataset
+            all_psnr.append(np.mean(sample_psnr))
+            all_ssim.append(np.mean(sample_ssim))
+            all_lpips.append(np.mean(sample_lpips))
+            all_mses.append(np.mean(sample_mse))
+
+        toc = timeit.default_timer()
+        duration = toc - tic
+
+        # Final KID score
+        kid_mean, kid_std = kid_metric.compute()
+
+        print(f"Theta: {theta:.3f}"
+              f"Avg PSNR: {np.mean(all_psnr):.2f}dB, "
+              f"SSIM: {np.mean(all_ssim):.3f}, "
+              f"LPIPS: {np.mean(all_lpips):.3f}, "
+              f"MSE: {np.mean(all_mses):.3f}, "
+              f"KID: {kid_mean.item():.4f} ± {kid_std.item():.4f}")

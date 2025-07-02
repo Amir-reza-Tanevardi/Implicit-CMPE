@@ -478,18 +478,18 @@ def build_trainer(checkpoint_path, args, forward_train=None):
             tmax=tmax,
         )
 
-    if args.fine_tuning_summary == 1:
-        consistency_net.trainable = False
+    # if args.fine_tuning_summary == 1:
+    #     consistency_net.trainable = False
 
 
-    print("Trainable variables:")
-    for var in summary_net.trainable_variables:
-        print(var.name)
+    # print("Trainable variables:")
+    # for var in summary_net.trainable_variables:
+    #     print(var.name)
 
-    print("Frozen variables (consistency net):")
-    for var in consistency_net.trainable_variables:
-        if var.trainable:
-            print(f"Warning: {var.name} is unexpectedly trainable!")
+    # print("Frozen variables (consistency net):")
+    # for var in consistency_net.trainable_variables:
+    #     if var.trainable:
+    #         print(f"Warning: {var.name} is unexpectedly trainable!")
     
 
     batch_size = args.batch_size

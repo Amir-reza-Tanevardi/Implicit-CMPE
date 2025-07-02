@@ -480,7 +480,7 @@ class ConsistencyAmortizer(AmortizedPosterior):
           deblurred_tensor : tf.Tensor of shape [batch_size, 784]
               Deblurred image tensor (flattened 28x28).
           """
-          size = 32
+          size = 28
           batch_size = tf.shape(blurred_tensor)[0]
 
           # Generate Gaussian PSF
@@ -645,7 +645,9 @@ class ConsistencyAmortizer(AmortizedPosterior):
         )
 
         conds = input_dict.get(defaults.DEFAULT_KEYS["summary_conditions"])
-        conds = self.deblur_gaussian_wiener(conds)
+        conds_d = self.deblur_gaussian_wiener(conds)
+        conds_0 = conds   
+        
         n_data, _ = tf.shape(conditions)
         # 2) build the time‐grid t_N > … > t_0
         ts = tf.reverse(discretize_time(self.eps, self.T_max, n_steps), axis=[-1])
@@ -656,9 +658,11 @@ class ConsistencyAmortizer(AmortizedPosterior):
         out = []
         for i in range(n_data):
             c = conditions[i:i+1]                     # (1,cond_dim)
-            cond = conds                  # (1,cond_dim)
+            #cond = conds_d                 # (1,cond_dim)
+        
             c_rep = tf.repeat(c, n_samples, axis=0)   # (n_samples, cond_dim)
-            cond_rep = tf.repeat(cond, n_samples, axis=0)   # (n_samples, input_dim)
+            cond_rep = tf.repeat(conds_d, n_samples, axis=0)   # (n_samples, input_dim)
+            cond_rep0 = tf.repeat(conds_0, n_samples, axis=0)
             #print(cond_rep.shape) 
             # 3) sample initial x_{t_N} ∼ Normal(0, t_N^2 I)
             t_N = ts[0]
@@ -684,7 +688,9 @@ class ConsistencyAmortizer(AmortizedPosterior):
 
                 # calculate x_var
 
-                x_var = tf.reduce_sum((tf.reshape(cond_rep, (n_samples, 3*32*32)) - x0_pred)**2, axis=1, keepdims=True) / d
+                #x_var1 = tf.reduce_sum((tf.reshape(cond_rep, (n_samples, 3*32*32)) - x0_pred)**2, axis=1, keepdims=True) / d
+                x_var = tf.norm((tf.reshape(cond_rep, (n_samples, 784)) - x0_pred), ord=2)**2
+                x_var_0 = tf.norm((tf.reshape(cond_rep0, (n_samples, 784)) - x0_pred), ord=2)**2 
                 #x_var = 0.1 /(2 + t_p**2)
                 #print(f"x_var: {x_var}")
                 # ← compute σ_{n-1} and the “α” coefficient a = sqrt((t_prev² − σ²)/t_n²)
@@ -696,11 +702,18 @@ class ConsistencyAmortizer(AmortizedPosterior):
                 # ← the DDIM mean:
                 err = (x - x0_pred)
                 
-                norm2 = tf.reduce_sum(err**2, axis=1, keepdims=True)
-                #if n == len(ts)-2:
-                #  err_coef = 0
-                #else:
-                err_coef = 0.90*tf.sqrt(a**2 + 1.0*x_var*((1-a))/norm2)#*((1-a)**2)/(norm2))#*((1.0 - a)**2)/norm2) 
+                norm22 = tf.reduce_sum(err**2, axis=1, keepdims=True)
+                norm2 = tf.norm(err,ord=2)**2
+                if n == len(ts)-2:
+                  err_coef = 0
+                else:
+                  # print(a**2)
+                  # print(tf.reshape(cond_rep0, (n_samples, 784)))
+                  # print(x0_pred)
+                  # print(28*x_var*((1-a)**2)/norm2)
+                  # print(28*x_var_0*((1-a)**2)/norm2)
+                  # print("")
+                  err_coef = 0.9*tf.sqrt(a**2 + 1.3*x_var_0*((1-a)**2)/norm2)#*((1-a)**2)/(norm2))#*((1.0 - a)**2)/norm2) 
                 #err_coef = 5.90*tf.sqrt(a**2 + 1.0*x_var*((a))/norm2)#*((1-a)**2)/(norm2))#*((1.0 - a)**2)/norm2) 
                 #err_coef = a
                 
