@@ -444,7 +444,7 @@ all_lpips = []
 all_mses = []
 
 n_samples = 1
-n_datasets = 1000
+n_datasets = 2000
 parameters = conf["parameters"][:n_datasets]
 
 def render_from_params(param_vector):
