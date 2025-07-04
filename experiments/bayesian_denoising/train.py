@@ -29,9 +29,10 @@ def inpainting_mask(image, mask_size=8):
     masked_image = image.copy()
 
     # Random location for the top-left corner of the square mask
-    top = np.random.randint(0, H - mask_size)
-    left = np.random.randint(0, W - mask_size)
-
+    # top = np.random.randint(0, H - mask_size)
+    # left = np.random.randint(0, W - mask_size)
+    top = 10
+    left = 10
     # Set the square region to 0 (or some neutral value)
     masked_image[top:top + mask_size, left:left + mask_size] = 0.0
 

@@ -91,8 +91,8 @@ def to_id(method, architecture, num_train):
     return f"{method}-{architecture}-{num_train}"
 
 checkpoint_path_dict = {
-    to_id("cmpe", "unet", 2000): "checkpoints/cmpe-unet-2000-25-04-03-093413/",
-    #to_id("cmpe", "unet", 2000): "checkpoints/cmpe-unet-2000-25-16-04-099999/",
+    #to_id("cmpe", "unet", 2000): "checkpoints/cmpe-unet-2000-25-04-03-093413/",
+    to_id("cmpe", "unet", 2000): "checkpoints/cmpe-unet-2000-25-16-04-099999/",
     #to_id("cmpe", "unet", 60000): "checkpoints/cmpe-unet-60000-25-04-10-150038/",
 }
 
@@ -126,7 +126,7 @@ plt.rcParams.update(
     }
 )
 
-conf = configurator(forward_test)
+conf = configurator_masked(forward_test)
 
 """## Per-Class Generation: Means and STDs"""
 
@@ -444,7 +444,7 @@ all_lpips = []
 all_mses = []
 
 n_samples = 1
-n_datasets = 2000
+n_datasets = 1000
 parameters = conf["parameters"][:n_datasets]
 
 def render_from_params(param_vector):

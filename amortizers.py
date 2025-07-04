@@ -617,6 +617,53 @@ class ConsistencyAmortizer(AmortizedPosterior):
         return post_samples
 
 
+        
+    def inpainting_mask(self, images, mask_size=8):
+      """
+      Applies an inpainting mask to a batch of flattened images (shape: [batch_size, 784]).
+
+      Parameters:
+      -----------
+      images     : tf.Tensor of shape (batch_size, 784)
+      mask_size  : size of the square mask to apply on each image
+      """
+      batch_size = tf.shape(images)[0]
+      height = width = 28
+
+      # Reshape to (batch_size, 28, 28)
+      images_reshaped = tf.reshape(images, (batch_size, height, width))
+
+      def mask_single_image(image):
+          # Random top-left corner
+          # top = tf.random.uniform([], 0, height - mask_size, dtype=tf.int32)
+          # left = tf.random.uniform([], 0, width - mask_size, dtype=tf.int32)
+          
+          top = 10
+          left = 10
+
+          # Create a mask of ones
+          mask = tf.ones_like(image)
+
+          # Apply 0s in square region
+          mask = tf.tensor_scatter_nd_update(
+              mask,
+              indices=tf.reshape(tf.stack(tf.meshgrid(tf.range(top, top + mask_size),
+                                                      tf.range(left, left + mask_size),
+                                                      indexing='ij'), axis=-1), [-1, 2]),
+              updates=tf.zeros([mask_size * mask_size], dtype=image.dtype) - 1
+          )
+
+          return image * mask
+
+      # Apply the mask to each image in the batch
+      masked_images = tf.map_fn(mask_single_image, images_reshaped)
+
+      # Flatten back to (batch_size, 784)
+      return tf.reshape(masked_images, (batch_size, height * width))
+
+        
+
+
     def sample_addim(self,
            input_dict,
            n_samples,
@@ -646,7 +693,7 @@ class ConsistencyAmortizer(AmortizedPosterior):
 
         conds = input_dict.get(defaults.DEFAULT_KEYS["summary_conditions"])
         conds_d = self.deblur_gaussian_wiener(conds)
-        conds_0 = conds   
+        conds_0 = conds
         
         n_data, _ = tf.shape(conditions)
         # 2) build the time‐grid t_N > … > t_0
@@ -690,8 +737,10 @@ class ConsistencyAmortizer(AmortizedPosterior):
 
                 #x_var1 = tf.reduce_sum((tf.reshape(cond_rep, (n_samples, 3*32*32)) - x0_pred)**2, axis=1, keepdims=True) / d
                 x_var = tf.norm((tf.reshape(cond_rep, (n_samples, 784)) - x0_pred), ord=2)**2
-                x_var_0 = tf.norm((tf.reshape(cond_rep0, (n_samples, 784)) - x0_pred), ord=2)**2 
-                #x_var = 0.1 /(2 + t_p**2)
+                cc = -1.0 + 2 * tf.reshape(cond_rep0, (n_samples, 784)) / 255.0
+                x_var_0 = tf.norm((cc - self.inpainting_mask(tf.reshape(x0_pred, (n_samples,28,28)))), ord=2)**2 
+                x_var_1 = tf.norm((cc - x0_pred), ord=2)**2 
+                x_var_2 = 0.1 /(2 + t_p**2)
                 #print(f"x_var: {x_var}")
                 # ← compute σ_{n-1} and the “α” coefficient a = sqrt((t_prev² − σ²)/t_n²)
                 sigma = eta * tf.sqrt(
@@ -711,9 +760,9 @@ class ConsistencyAmortizer(AmortizedPosterior):
                   # print(tf.reshape(cond_rep0, (n_samples, 784)))
                   # print(x0_pred)
                   # print(28*x_var*((1-a)**2)/norm2)
-                  # print(28*x_var_0*((1-a)**2)/norm2)
-                  # print("")
-                  err_coef = 0.9*tf.sqrt(a**2 + 1.3*x_var_0*((1-a)**2)/norm2)#*((1-a)**2)/(norm2))#*((1.0 - a)**2)/norm2) 
+                  #print(x_var_0)
+                  #print("")
+                  err_coef = 0.9*tf.sqrt(a**2 + 1.3*x_var_2*((1-a)**2)/norm2)#*((1-a)**2)/(norm2))#*((1.0 - a)**2)/norm2) 
                 #err_coef = 5.90*tf.sqrt(a**2 + 1.0*x_var*((a))/norm2)#*((1-a)**2)/(norm2))#*((1.0 - a)**2)/norm2) 
                 #err_coef = a
                 
