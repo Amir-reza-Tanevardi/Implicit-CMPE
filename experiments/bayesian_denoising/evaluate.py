@@ -92,8 +92,8 @@ def to_id(method, architecture, num_train):
 
 checkpoint_path_dict = {
     #to_id("cmpe", "unet", 2000): "checkpoints/cmpe-unet-2000-25-04-03-093413/",
-    to_id("cmpe", "unet", 2000): "checkpoints/cmpe-unet-2000-25-16-04-099999/",
-    #to_id("cmpe", "unet", 60000): "checkpoints/cmpe-unet-60000-25-04-10-150038/",
+    #to_id("cmpe", "unet", 2000): "checkpoints/cmpe-unet-2000-25-16-04-099999/",
+    to_id("cmpe", "unet", 60000): "checkpoints/cmpe-unet-60000-25-04-10-150038/",
 }
 
 arg_dict = {}
@@ -126,7 +126,7 @@ plt.rcParams.update(
     }
 )
 
-conf = configurator_masked(forward_test)
+conf = configurator(forward_test)
 
 """## Per-Class Generation: Means and STDs"""
 
@@ -280,19 +280,19 @@ def create_sample_plots(trainer, seed=42, filepath=None, cmpe_steps=30, fmpe_ste
         pass
     return f
 
-for key, trainer in trainer_dict.items():
-    print(key)
-    fig_dir = f"figures/{key}"
-    os.makedirs(fig_dir, exist_ok=True)
-    f = create_sample_plots(
-        trainer,
-        seed=42,
-        filepath=os.path.join(fig_dir, "samples_main.pdf"),
-        method=arg_dict[key].method,
-        cmpe_steps=cmpe_steps,
-        fmpe_step_size=fmpe_step_size,
-    )
-    f.show()
+# for key, trainer in trainer_dict.items():
+#     print(key)
+#     fig_dir = f"figures/{key}"
+#     os.makedirs(fig_dir, exist_ok=True)
+#     f = create_sample_plots(
+#         trainer,
+#         seed=42,
+#         filepath=os.path.join(fig_dir, "samples_main.pdf"),
+#         method=arg_dict[key].method,
+#         cmpe_steps=cmpe_steps,
+#         fmpe_step_size=fmpe_step_size,
+#     )
+#     f.show()
 
 # """### Averaged RMSE"""
 

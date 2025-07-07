@@ -2,6 +2,8 @@ import bayesflow.default_settings as defaults
 import numpy as np
 import tensorflow as tf
 from bayesflow.amortizers import AmortizedPosterior
+from skimage.util import random_noise
+from scipy.ndimage import gaussian_filter
 
 # Training helpers
 from bayesflow.exceptions import SummaryStatsError
@@ -616,7 +618,7 @@ class ConsistencyAmortizer(AmortizedPosterior):
             return post_samples.numpy()
         return post_samples
 
-
+    
         
     def inpainting_mask(self, images, mask_size=8):
       """
@@ -661,8 +663,32 @@ class ConsistencyAmortizer(AmortizedPosterior):
       # Flatten back to (batch_size, 784)
       return tf.reshape(masked_images, (batch_size, height * width))
 
-        
+    
 
+    def blur(self, images):
+        batch_size = tf.shape(images)[0]
+        height = width = 28
+
+        images_reshaped = tf.reshape(images, (batch_size, height, width))
+
+        def grayscale_camera_np(image, noise="poisson", psf_width=2.5, noise_scale=1, noise_gain=0.5):
+            image = noise_scale * image
+            image = noise_gain * random_noise(image, mode=noise)
+            image = gaussian_filter(image, sigma=psf_width)
+            return image.astype(np.float32)
+
+        def tf_wrapper(image):
+            return tf.numpy_function(
+                func=grayscale_camera_np,
+                inp=[image],
+                Tout=tf.float32
+            )
+
+        masked_images = tf.map_fn(tf_wrapper, images_reshaped)
+
+        return tf.reshape(masked_images, (batch_size, height * width))
+        
+    
 
     def sample_addim(self,
            input_dict,
@@ -736,11 +762,20 @@ class ConsistencyAmortizer(AmortizedPosterior):
                 # calculate x_var
 
                 #x_var1 = tf.reduce_sum((tf.reshape(cond_rep, (n_samples, 3*32*32)) - x0_pred)**2, axis=1, keepdims=True) / d
-                x_var = tf.norm((tf.reshape(cond_rep, (n_samples, 784)) - x0_pred), ord=2)**2
-                cc = -1.0 + 2 * tf.reshape(cond_rep0, (n_samples, 784)) / 255.0
-                x_var_0 = tf.norm((cc - self.inpainting_mask(tf.reshape(x0_pred, (n_samples,28,28)))), ord=2)**2 
-                x_var_1 = tf.norm((cc - x0_pred), ord=2)**2 
-                x_var_2 = 0.1 /(2 + t_p**2)
+                # x_var = tf.norm((tf.reshape(cond_rep, (n_samples, 784)) - x0_pred), ord=2)**2
+                # cc = -1.0 + 2 * tf.reshape(cond_rep0, (n_samples, 784)) / 255.0
+                # x_var_0 = tf.norm((cc - self.inpainting_mask(tf.reshape(x0_pred, (n_samples,28,28)))), ord=2)**2 
+                # x_var_1 = tf.norm((cc - x0_pred), ord=2)**2 
+                # x_var_2 = 0.1 /(2 + t_p**2)
+                
+
+                cc = tf.reshape(cond_rep0, (n_samples, 784))
+                x0_scaled = (1.00 + np.clip(x0_pred, a_min=-1.00, a_max=1.00))/2.00
+                x_var_0 = tf.norm((cc - self.blur(x0_scaled)), ord=2)**2 
+                x_var_1 = tf.norm((cc - x0_pred), ord=2)**2
+                x_var_2 = tf.norm((tf.reshape(cond_rep, (n_samples, 784)) - x0_pred), ord=2)**2
+
+
                 #print(f"x_var: {x_var}")
                 # ← compute σ_{n-1} and the “α” coefficient a = sqrt((t_prev² − σ²)/t_n²)
                 sigma = eta * tf.sqrt(
