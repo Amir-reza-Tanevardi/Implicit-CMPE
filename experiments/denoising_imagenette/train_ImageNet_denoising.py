@@ -1,6 +1,7 @@
 import argparse
 import datetime
 import os
+import importlib.util
 import pickle
 import sys
 
@@ -340,6 +341,27 @@ if __name__=='__main__':
         except (ValueError, RuntimeError):
             # Invalid device or cannot modify virtual devices once initialized.
             pass
+    
+    ##### Fix to bayesflow helper_functions.py file #####
+    spec = importlib.util.find_spec("bayesflow")
+    if spec and spec.origin:
+        bayesflow_root = os.path.dirname(spec.origin)  # path to bayesflow package
+        target_file = os.path.join(bayesflow_root, "helper_functions.py")  # adjust as needed
+
+        # Example: patch the file
+        with open(target_file, "r") as f:
+            lines = f.readlines()
+
+        # Replace deprecated code or make other fixes
+        lines = [line.replace("optimizer.lr", "optimizer.learning_rate") for line in lines]  # example fix
+
+        with open(target_file, "w") as f:
+            f.writelines(lines)
+
+        print(f"Patched {target_file}")
+    else:
+        print("Could not locate bayesflow.")
+    #####################################################
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--img-size', type=int, default=128)
