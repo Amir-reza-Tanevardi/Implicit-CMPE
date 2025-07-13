@@ -28,7 +28,7 @@ def load_imagenet(img_size, split):
         image = image * 2.0 - 1.0  # [-1,1]
         return image, image
 
-    ds = tfds.load('imagenette/160px', split=split, as_supervised=True)
+    ds = tfds.load('imagenette/160px', split=split, as_supervised=True, data_dir = "/work/pi_aghasemi_umass_edu/afzali_umass/W2S/.cahce")
     ds = ds.map(_preprocess, num_parallel_calls=tf.data.AUTOTUNE)
     ds = ds.shuffle(1024).prefetch(tf.data.AUTOTUNE)
     return ds
@@ -244,7 +244,7 @@ def build_unet_model(img_size, channels, widths, has_attention, tmax,
     x = layers.GroupNormalization(norm_groups)(x)
     x = layers.Activation('swish')(x)
     x = layers.Conv2D(channels, 3, padding='same', kernel_initializer=kernel_init(0.0))(x)
-    out = layers.Flatten()(x)
+    out = x
 
     model = keras.Model([image_input, cond_input, time_input], out, name='imagenet_unet')
     model.latent_dim = img_size*img_size*channels
@@ -364,9 +364,9 @@ if __name__=='__main__':
     #####################################################
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--img-size', type=int, default=128)
+    parser.add_argument('--img-size', type=int, default=224)
     parser.add_argument('--batch-size', type=int, default=64)
-    parser.add_argument('--initial-learning-rate', type=float, default=1e-4)
+    parser.add_argument('--initial-learning-rate', type=float, default=5e-4)
     parser.add_argument('--num-steps', type=int, default=100000)
     parser.add_argument("--num-training", type=int, default=60000)
     parser.add_argument("--lr-adapt", type=str, default="none", choices=["none", "cosine"])

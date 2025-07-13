@@ -41,8 +41,8 @@ num_test = 500
 
 # 2) Load ImageNette-160 instead of Fashion MNIST
 # ------------------------------------------------
-def load_imagenette160(split, img_size=160):
-    ds = tfds.load("imagenette/160px", split=split, as_supervised=True)
+def load_imagenette(split, img_size=160):
+    ds = tfds.load("imagenette", split=split, as_supervised=True, data_dir = "/work/pi_aghasemi_umass_edu/afzali_umass/W2S/.cahce")
     def _prep(image, label):
         image = tf.image.resize(image, [img_size, img_size])
         image = tf.cast(image, tf.float32) / 255.0
@@ -57,7 +57,7 @@ def load_imagenette160(split, img_size=160):
 
 
 #train_ds = load_imagenette160("train[:5%]", img_size=160, batch_size=args.batch_size)  # <<< EDITED
-val_ds   = load_imagenette160("validation", img_size=160)  # <<< EDITED
+val_ds   = load_imagenette("validation", img_size=224)  # <<< EDITED
 
 # <<< ADDED: unbatch then take only num_test examples
 test_ds_unbatched = val_ds.take(num_test)
@@ -202,10 +202,10 @@ def create_mean_std_plots(
         samples = np.clip(samples, a_min=-1.01, a_max=1.01)
 
         # Plot truth and blurred
-        axarr[0,i].imshow((inp["parameters"].reshape(160,160,3)+1)/2)
-        axarr[1,i].imshow((inp["summary_conditions"].reshape(160,160,3)+1)/2)
-        axarr[2,i].imshow((samples.mean(0).reshape(160,160,3)+1)/2)
-        axarr[3,i].imshow((samples.std(0).reshape(160,160,3)+1)/2)
+        axarr[0,i].imshow((inp["parameters"].reshape(224,224,3)+1)/2)
+        axarr[1,i].imshow((inp["summary_conditions"].reshape(224,224,3)+1)/2)
+        axarr[2,i].imshow((samples.mean(0).reshape(224,224,3)+1)/2)
+        axarr[3,i].imshow((samples.std(0).reshape(224,224,3)+1)/2)
         axarr[0, i].set_title(class_names[i])
 
     for j, label in enumerate(y_labels):
@@ -266,11 +266,11 @@ def create_sample_plots(trainer, seed=42, filepath=None, cmpe_steps=30, fmpe_ste
         samples = np.clip(samples, a_min=-1.01, a_max=1.01)
 
         # Plot truth and blurred
-        axarr[0,i].imshow((inp["parameters"].reshape(160,160,3)+1)/2)
-        axarr[1,i].imshow((inp["summary_conditions"].reshape(160,160,3)+1)/2)
-        axarr[2,i].imshow((samples.mean(0).reshape(160,160,3)+1)/2)
+        axarr[0,i].imshow((inp["parameters"].reshape(224,224,3)+1)/2)
+        axarr[1,i].imshow((inp["summary_conditions"].reshape(224,224,3)+1)/2)
+        axarr[2,i].imshow((samples.mean(0).reshape(224,224,3)+1)/2)
         for j in range(n_samples):
-            axarr[i, 2 + j].imshow((samples[j].reshape(160,160,3)+1)/2)
+            axarr[i, 2 + j].imshow((samples[j].reshape(224,224,3)+1)/2)
 
         axarr[i, 0].set_ylabel(class_names[i], fontsize=12)
 
@@ -345,7 +345,7 @@ def render_from_params(param_vector):
     Reshape a flattened parameter vector into a (160, 160, 3) RGB image.
     Assumes input is a 1D array of shape (160*160*3,).
     """
-    img = param_vector.reshape(160, 160, 3)     # <<< EDITED
+    img = param_vector.reshape(224, 224, 3)     # <<< EDITED
     # scale from [-1,1] back to [0,1]
     return (img + 1.0) / 2.0                    # <<< EDITED
 
@@ -405,7 +405,7 @@ for key, trainer in trainer_dict.items():
 
                 # Image-level metrics on [0,1]
                 psnr = peak_signal_noise_ratio(true_img, recon_img, data_range=1.0)
-                ssim = structural_similarity(true_img, recon_img, multichannel=True, data_range=1.0)
+                ssim = structural_similarity(true_img, recon_img, channel_axis=-1, data_range=1.0)
                 mse  = mean_squared_error(true_img, recon_img)
 
                 # LPIPS on 64×64 float in [-1,1]

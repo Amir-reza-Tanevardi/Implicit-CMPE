@@ -387,6 +387,11 @@ class ConsistencyAmortizer(AmortizedPosterior):
         """
         F = self.student([x, c, t], **kwargs)
 
+        if len(F.shape) == 4:
+          batch_size = tf.shape(F)[0]
+          flattened_dim = tf.reduce_prod(tf.shape(F)[1:])
+          F = tf.reshape(F, (batch_size, flattened_dim))
+
         # Compute skip and out parts (vectorized, since self.sigma2 is of shape (1, input_dim)
         # Thus, we can do a cross product with the time vector which is (batch_size, 1) for
         # a resulting shape of cskip and cout of (batch_size, input_dim)
