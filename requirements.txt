@@ -81,6 +81,7 @@ seaborn==0.13.0
 six==1.16.0
 stack-data==0.6.3
 tabview==1.4.4
+tensorflow==2.19.0
 termcolor==2.3.0
 threadpoolctl==3.2.0
 toolz==0.12.0
