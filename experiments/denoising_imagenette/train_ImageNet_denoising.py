@@ -418,10 +418,10 @@ if __name__=='__main__':
 
     print(f"Training for {num_epochs} epochs...")
 
-    gpus = tf.config.list_physical_devices('GPU')
-    for gpu in gpus:
-      tf.config.experimental.set_memory_growth(gpu, True)
-
+    import os, psutil
+    process = psutil.Process(os.getpid())
+    print("CPU RAM usage (GB):", process.memory_info().rss / 1e9)
+    
     trainer.train_offline(
         forward_train,
         optimizer=optimizer,
