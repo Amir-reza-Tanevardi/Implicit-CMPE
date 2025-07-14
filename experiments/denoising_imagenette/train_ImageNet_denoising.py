@@ -388,7 +388,11 @@ if __name__=='__main__':
     os.makedirs(args.checkpoint_path, exist_ok=True)
     with open(os.path.join(args.checkpoint_path,'args.pkl'),'wb') as f:
         pickle.dump(vars(args), f)
-
+    
+    import os, psutil
+    process = psutil.Process(os.getpid())
+    print("CPU RAM usage (GB):", process.memory_info().rss / 1e9)
+    
     train_ds = load_imagenet(args.img_size, 'train')
     val_ds   = load_imagenet(args.img_size, 'validation')
     
@@ -418,7 +422,6 @@ if __name__=='__main__':
 
     print(f"Training for {num_epochs} epochs...")
 
-    import os, psutil
     process = psutil.Process(os.getpid())
     print("CPU RAM usage (GB):", process.memory_info().rss / 1e9)
     
