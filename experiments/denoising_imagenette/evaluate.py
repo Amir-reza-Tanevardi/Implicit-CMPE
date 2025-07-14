@@ -42,7 +42,7 @@ num_test = 500
 # 2) Load ImageNette-160 instead of Fashion MNIST
 # ------------------------------------------------
 def load_imagenette(split, img_size=160):
-    ds = tfds.load("imagenette", split=split, as_supervised=True, data_dir = "/work/pi_aghasemi_umass_edu/afzali_umass/W2S/.cahce")
+    ds = tfds.load("imagenette", split=split, as_supervised=True, data_dir = "/work/pi_aghasemi_umass_edu/afzali_umass/W2S/.cache")
     def _prep(image, label):
         image = tf.image.resize(image, [img_size, img_size])
         image = tf.cast(image, tf.float32) / 255.0
