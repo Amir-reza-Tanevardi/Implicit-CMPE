@@ -74,7 +74,7 @@ def load_cifar(img_size, split):
 
 
 #train_ds = load_imagenette160("train[:5%]", img_size=160, batch_size=args.batch_size)  # <<< EDITED
-test_ds = load_cifar(args.img_size, 'test')  # <<< EDITED
+test_ds = load_cifar(img_size, 'test')  # <<< EDITED
 
 # <<< ADDED: unbatch then take only num_test examples
 test_ds_unbatched = test_ds.take(num_test)
