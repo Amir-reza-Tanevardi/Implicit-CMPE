@@ -44,37 +44,37 @@ img_size=32
 
 # 2) Load ImageNette-160 instead of Fashion MNIST
 # ------------------------------------------------
-def load_imagenette160(split, img_size=160):
-    ds = tfds.load("imagenette/160px", split=split, as_supervised=True)
-    def _prep(image, label):
-        image = tf.image.resize(image, [img_size, img_size])
-        image = tf.cast(image, tf.float32) / 255.0
-        image = image * 2.0 - 1.0
-        return image, label   # <<< return the label now
-    return (
-        ds
-        .map(_prep, num_parallel_calls=tf.data.AUTOTUNE)
-        .shuffle(1024)
-        .prefetch(tf.data.AUTOTUNE)
-    )
+# def load_imagenette160(split, img_size=160):
+#     ds = tfds.load("imagenette/160px", split=split, as_supervised=True)
+#     def _prep(image, label):
+#         image = tf.image.resize(image, [img_size, img_size])
+#         image = tf.cast(image, tf.float32) / 255.0
+#         image = image * 2.0 - 1.0
+#         return image, label   # <<< return the label now
+#     return (
+#         ds
+#         .map(_prep, num_parallel_calls=tf.data.AUTOTUNE)
+#         .shuffle(1024)
+#         .prefetch(tf.data.AUTOTUNE)
+#     )
 
-def load_cifar(split, img_size=32):
-    ds = tfds.load("cifar10", split=split, as_supervised=True)
-    def _prep(image, label):
+def load_cifar(img_size, split):
+    """Loads ImageNet using TensorFlow Datasets."""
+    import tensorflow_datasets as tfds
+    def _preprocess(image, label):
         #image = tf.image.resize(image, [img_size, img_size])
-        image = tf.cast(image, tf.float32) / 255.0
-        image = image * 2.0 - 1.0
-        return image, label   # <<< return the label now
-    return (
-        ds
-        .map(_prep, num_parallel_calls=tf.data.AUTOTUNE)
-        .shuffle(1024)
-        .prefetch(tf.data.AUTOTUNE)
-    )    
+        image = tf.cast(image, tf.float32) / 255.0  # [0,1]
+        image = image * 2.0 - 1.0  # [-1,1]
+        return image, image
+
+    ds = tfds.load('cifar10', split=split, as_supervised=True, data_dir = "/work/pi_aghasemi_umass_edu/afzali_umass/W2S/.cache")
+    ds = ds.map(_preprocess, num_parallel_calls=tf.data.AUTOTUNE)
+    ds = ds.shuffle(1024).prefetch(tf.data.AUTOTUNE)
+    return ds
 
 
 #train_ds = load_imagenette160("train[:5%]", img_size=160, batch_size=args.batch_size)  # <<< EDITED
-test_ds   = load_cifar("test", img_size=img_size)  # <<< EDITED
+test_ds = load_cifar(args.img_size, 'test')  # <<< EDITED
 
 # <<< ADDED: unbatch then take only num_test examples
 test_ds_unbatched = test_ds.take(num_test)
@@ -129,7 +129,7 @@ def to_id(method, architecture, num_train):
     return f"{method}-{architecture}-{num_train}"
 
 checkpoint_path_dict = {
-    to_id("cmpe", "unet", 2000): "checkpoints/cifar10-deblurring-cmpe-unet-20000-25-06-29-080038/",
+    to_id("cmpe", "unet", 2000): "checkpoints/cifar10-deblurring-cmpe-unet-45000-25-07-14-113153/",
     #to_id("cmpe", "unet", 60000): "checkpoints/cmpe-unet-60000-25-04-10-150038/",
 }
 
@@ -354,7 +354,7 @@ all_lpips = []
 all_mses = []
 
 n_samples = 1
-n_datasets = 500
+n_datasets = 1000
 
 # <<< EDITED FOR IMAGENETTE: parameters are 160*160*3 vectors now
 parameters = conf["parameters"][:n_datasets]  # shape (n, 160*160*3)
