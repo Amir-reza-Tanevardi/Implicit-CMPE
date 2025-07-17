@@ -365,10 +365,10 @@ if __name__=='__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--img-size', type=int, default=224)
-    parser.add_argument('--batch-size', type=int, default=64)
+    parser.add_argument('--batch-size', type=int, default=4)
     parser.add_argument('--initial-learning-rate', type=float, default=5e-4)
     parser.add_argument('--num-steps', type=int, default=100000)
-    parser.add_argument("--num-training", type=int, default=60000)
+    parser.add_argument("--num-training", type=int, default=12000)
     parser.add_argument("--lr-adapt", type=str, default="none", choices=["none", "cosine"])
     parser.add_argument('--tmax', type=float, default=1000.0)
     parser.add_argument('--epsilon', type=float, default=1e-3)
