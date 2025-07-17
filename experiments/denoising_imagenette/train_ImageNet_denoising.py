@@ -397,7 +397,7 @@ if __name__=='__main__':
     val_ds   = load_imagenet(args.img_size, 'validation')
     
     train_ds_unbatched = train_ds.take(args.num_training)
-    val_ds_unbatched = val_ds.take(100)
+    val_ds_unbatched = val_ds.take(10)
     
     train_imgs = []
     train_lbls = []
