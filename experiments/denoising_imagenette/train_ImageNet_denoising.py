@@ -397,6 +397,8 @@ if __name__=='__main__':
     val_ds   = load_imagenet(args.img_size, 'validation')
     
     train_ds_unbatched = train_ds.take(args.num_training)
+    val_ds_unbatched = val_ds.take(100)
+    
     train_imgs = []
     train_lbls = []
     for img, lbl in train_ds_unbatched:
@@ -407,7 +409,7 @@ if __name__=='__main__':
 
     val_imgs = []
     val_lbls = []
-    for img, lbl in val_ds:
+    for img, lbl in val_ds_unbatched:
         val_imgs.append(img.numpy())
         val_lbls.append(lbl.numpy())
     val_imgs = np.stack(val_imgs, axis=0)
