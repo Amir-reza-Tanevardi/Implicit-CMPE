@@ -372,7 +372,7 @@ for key, trainer in trainer_dict.items():
     print(f"== Evaluating trainer: {key} ==")
 
     # Initialize KID per-trainer
-    kid_metric = KernelInceptionDistance(subset_size=50).to(device)
+    kid_metric = KernelInceptionDistance(subset_size=100).to(device)
 
     # Pre-initialize model
     if arg_dict[key].method == "cmpe":
