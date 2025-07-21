@@ -46,7 +46,7 @@ parser = argparse.ArgumentParser(description="Evaluation script with arguments."
 
 parser.add_argument('--c1', type=float, default=1.0, help='First coefficient (float).')
 parser.add_argument('--c2', type=float, default=1.0, help='Second coefficient (float).')
-parser.add_argument('--num_test', type=float, default=1000, help='Second coefficient (float).')
+parser.add_argument('--num_test', type=int, default=1000, help='Second coefficient (float).')
 parser.add_argument('--type', type=str, default='default', choices=['default', 'addim'],
                     help='Evaluation type: default, or addim.')
 
