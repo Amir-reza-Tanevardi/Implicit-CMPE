@@ -809,7 +809,7 @@ class ConsistencyAmortizer(AmortizedPosterior):
                   # print(x_var_0*((1-a)**2)/norm2)
                   # #print(x_var_0)
                   # print("")
-                  err_coef = 0.9 * tf.sqrt(a**2 + 1.0*x_var_0*((1-a)**2)/norm2)#*((1-a)**2)/(norm2))#*((1.0 - a)**2)/norm2) 
+                  err_coef = 1.0 * tf.sqrt(a**2 + 0.5*x_var_0*((1-a)**2)/norm2)#*((1-a)**2)/(norm2))#*((1.0 - a)**2)/norm2) 
                 #err_coef = 5.90*tf.sqrt(a**2 + 1.0*x_var*((a))/norm2)#*((1-a)**2)/(norm2))#*((1.0 - a)**2)/norm2) 
                 #err_coef = a
                 
@@ -829,7 +829,7 @@ class ConsistencyAmortizer(AmortizedPosterior):
                 else:
                     x = x_mean
 
-            out.append(self.blur(x0_scaled))
+            out.append(x)
 
         # stack and possibly squeeze
         post = tf.stack(out, axis=0)  # (n_data, n_samples, input_dim)
