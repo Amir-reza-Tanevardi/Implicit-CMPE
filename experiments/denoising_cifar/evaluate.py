@@ -65,7 +65,7 @@ def load_cifar(img_size, split):
         #image = tf.image.resize(image, [img_size, img_size])
         image = tf.cast(image, tf.float32) / 255.0  # [0,1]
         image = image * 2.0 - 1.0  # [-1,1]
-        return image, image
+        return image, label
 
     ds = tfds.load('cifar10', split=split, as_supervised=True, data_dir = "/work/pi_aghasemi_umass_edu/afzali_umass/W2S/.cache")
     ds = ds.map(_preprocess, num_parallel_calls=tf.data.AUTOTUNE)
