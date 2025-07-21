@@ -704,6 +704,8 @@ class ConsistencyAmortizer(AmortizedPosterior):
            theta = 0.9,
            eta: float = 0.0,           # ← new hyperparameter
            to_numpy: bool = True,
+           c1: float = 1.0,
+           c2: float = 1.0,          
            **kwargs):
         """
         DDIM / consistency‐model sampler following eq. (9) in your notes:
@@ -809,7 +811,7 @@ class ConsistencyAmortizer(AmortizedPosterior):
                   # print(100*x_var_0*((1-a)**2)/norm2)
                   #print(x_var_0)
                   # print("")
-                  err_coef = 1.0 * tf.sqrt(a**2 + 200*x_var_0*((1-a)**2)/norm2)#*((1-a)**2)/(norm2))#*((1.0 - a)**2)/norm2) 
+                  err_coef = c1 * tf.sqrt(a**2 + c2*x_var_0*((1-a)**2)/norm2)#*((1-a)**2)/(norm2))#*((1.0 - a)**2)/norm2) 
                 #err_coef = 5.90*tf.sqrt(a**2 + 1.0*x_var*((a))/norm2)#*((1-a)**2)/(norm2))#*((1.0 - a)**2)/norm2) 
                 #err_coef = a
                 
