@@ -129,18 +129,18 @@ def to_id(method, architecture, num_train):
     return f"{method}-{architecture}-{num_train}"
 
 checkpoint_path_dict = {
-    to_id("cmpe", "unet", 2000): "checkpoints/cifar10-deblurring-cmpe-unet-45000-25-07-14-113153/",
+    to_id("cmpe", "unet", 45000): "checkpoints/cifar10-deblurring-cmpe-unet-45000-25-07-14-113153/",
     #to_id("cmpe", "unet", 60000): "checkpoints/cmpe-unet-60000-25-04-10-150038/",
 }
 
 arg_dict = {}
 for key, checkpoint_path in checkpoint_path_dict.items():
     with open(os.path.join(checkpoint_path, "args.pkl"), "rb") as f:
-        arg_dict[key] = pickle.load(f)
+        arg_dict[key] = Namespace(**pickle.load(f))
 
 trainer_dict = {}
 for key, checkpoint_path in checkpoint_path_dict.items():
-    trainer_dict[key] = build_trainer(checkpoint_path, Namespace(**arg_dict[key]))
+    trainer_dict[key] = build_trainer(checkpoint_path, arg_dict[key])
 
 for key, trainer in trainer_dict.items():
     fig_dir = f"figures/{key}"
@@ -320,7 +320,7 @@ for key, trainer in trainer_dict.items():
         trainer,
         seed=42,
         filepath=os.path.join(fig_dir, "samples_main.pdf"),
-        method=Namespace(**arg_dict[key]).method,
+        method=arg_dict[key].method,
         cmpe_steps=cmpe_steps,
         fmpe_step_size=fmpe_step_size,
         image_size = img_size
