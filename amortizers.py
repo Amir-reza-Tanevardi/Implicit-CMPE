@@ -808,8 +808,8 @@ class ConsistencyAmortizer(AmortizedPosterior):
                   # print(tf.reduce_max(cc).numpy())
                   # print(100*x_var_0*((1-a)**2)/norm2)
                   #print(x_var_0)
-                  print("")
-                  err_coef = 1.0 * tf.sqrt(a**2 + 150*x_var_0*((1-a)**2)/norm2)#*((1-a)**2)/(norm2))#*((1.0 - a)**2)/norm2) 
+                  # print("")
+                  err_coef = 1.0 * tf.sqrt(a**2 + 200*x_var_0*((1-a)**2)/norm2)#*((1-a)**2)/(norm2))#*((1.0 - a)**2)/norm2) 
                 #err_coef = 5.90*tf.sqrt(a**2 + 1.0*x_var*((a))/norm2)#*((1-a)**2)/(norm2))#*((1.0 - a)**2)/norm2) 
                 #err_coef = a
                 
