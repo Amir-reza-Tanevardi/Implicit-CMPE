@@ -313,128 +313,120 @@ for key, trainer in trainer_dict.items():
 ### New Metrics
 ##############################
 
-from skimage.metrics import peak_signal_noise_ratio, structural_similarity, mean_squared_error
-import torchvision.transforms.functional as TF
 import torch
+import torch.nn.functional as F
+from skimage.metrics import peak_signal_noise_ratio, structural_similarity, mean_squared_error
+from torchmetrics.image.kid import KernelInceptionDistance
+import torchvision.transforms.functional as TF
 import lpips
 import numpy as np
-import os
 import timeit
-import torch.nn.functional as F
-from torchmetrics.image.kid import KernelInceptionDistance
 
-# Initialize LPIPS metric
-lpips_metric = lpips.LPIPS(net='alex')  # Pretrained LPIPS model
-
-# Initialize KID metric
-kid_metric = KernelInceptionDistance(subset_size=50)
-
-all_psnr = []
-all_ssim = []
-all_lpips = []
-all_mses = []
-
+# === CONFIG ===
+img_size = 224
+batch_size = 64
 n_samples = 1
-n_datasets = 500
+n_datasets = 1000
 
-# <<< EDITED FOR IMAGENETTE: parameters are 160*160*3 vectors now
-parameters = conf["parameters"][:n_datasets]  # shape (n, 160*160*3)
+# === DEVICE SETUP ===
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(device)
+torch.backends.cudnn.benchmark = True  # optimize conv performance
+
+# === METRICS ===
+lpips_metric = lpips.LPIPS(net='vgg').to(device)  # CHANGED to VGG + moved to GPU
+
+# === INPUT PARAMS ===
+parameters = conf["parameters"][:n_datasets]  # SHAPE: (n_datasets, 224*224*3)
 
 def render_from_params(param_vector):
-    """
-    Reshape a flattened parameter vector into a (160, 160, 3) RGB image.
-    Assumes input is a 1D array of shape (160*160*3,).
-    """
-    img = param_vector.reshape(224, 224, 3)     # <<< EDITED
-    # scale from [-1,1] back to [0,1]
-    return (img + 1.0) / 2.0                    # <<< EDITED
+    img = param_vector.reshape(img_size, img_size, 3)
+    return (img + 1.0) / 2.0  # scale to [0,1]
 
 for key, trainer in trainer_dict.items():
-    print(key, end="")
+    print(f"== Evaluating trainer: {key} ==")
 
-    # sample once, to avoid contaminating timing with tracing
-    c = conf["summary_conditions"][0, None]
-    print(f" Initializing...")
+    # Initialize KID per-trainer
+    kid_metric = KernelInceptionDistance(subset_size=50).to(device)
+
+    # Pre-initialize model
     if arg_dict[key].method == "cmpe":
-        trainer.amortizer.sample({"summary_conditions": c}, n_steps=cmpe_steps, n_samples=n_samples)
-    
-    for theta in np.linspace(3,3,1):
-        # store samples
-        post_samples = np.zeros((n_datasets, n_samples, parameters.shape[-1]))  # <<< EDITED
+        c = conf["summary_conditions"][0, None]
+        with torch.no_grad():
+            trainer.amortizer.sample({"summary_conditions": c}, n_steps=cmpe_steps, n_samples=n_samples)
+
+    for theta in np.linspace(3, 3, 1):
+        all_psnr, all_ssim, all_lpips, all_mses = [], [], [], []
 
         tic = timeit.default_timer()
-        for i in range(n_datasets):
-            print(f"{i+1:03}/{n_datasets}", end="\r")
-            c = conf["summary_conditions"][i, None]
-            if arg_dict[key].method == "cmpe":
-                post_samples[i] = trainer.amortizer.sample(
-                    {"summary_conditions": c}, n_steps=cmpe_steps, n_samples=n_samples
-                )
 
-            # Ground truth
-            true_param = parameters[i]
-            true_img = render_from_params(true_param)     # (160, 160, 3), [0,1]   # <<< EDITED
-            true_tensor = TF.to_tensor(true_img).unsqueeze(0)              # shape (1,3,160,160)  # <<< EDITED
-            # KID/Inception expects 299×299 uint8
-            true_tensor_299 = F.interpolate(
-                (true_tensor * 255.0).clamp(0,255).to(torch.uint8),
-                size=(299, 299),
-                mode='bilinear',
-                align_corners=False
-            )
+        with torch.no_grad():
+            for b_start in range(0, n_datasets, batch_size):
+                b_end = min(b_start + batch_size, n_datasets)
+                b_size = b_end - b_start
 
-            # Accumulate metrics across samples
-            sample_psnr = []
-            sample_ssim = []
-            sample_lpips = []
-            sample_mse = []
+                batch_params = parameters[b_start:b_end]
+                batch_conditions = conf["summary_conditions"][b_start:b_end]
 
-            for j in range(n_samples):
-                recon_img = render_from_params(post_samples[i, j])  # <<< EDITED
-                recon_tensor = TF.to_tensor(recon_img).unsqueeze(0) # <<< EDITED
-                recon_tensor_299 = F.interpolate(
-                    (recon_tensor * 255.0).clamp(0,255).to(torch.uint8),
-                    size=(299, 299),
-                    mode='bilinear',
-                    align_corners=False
-                )
+                # === SAMPLE FROM MODEL ===
+                if arg_dict[key].method == "cmpe":
+                    batch_samples = []
+                    for i in range(b_size):
+                        sample = trainer.amortizer.sample(
+                            {"summary_conditions": batch_conditions[i, None]},
+                            n_steps=cmpe_steps,
+                            n_samples=n_samples
+                        )
+                        batch_samples.append(sample[0])
+                    batch_samples = np.stack(batch_samples)  # shape: (b_size, D)
+                else:
+                    raise NotImplementedError("Method not supported")
 
-                # Add to KID (distribution-level comparison)
-                kid_metric.update(true_tensor_299, real=True)
-                kid_metric.update(recon_tensor_299, real=False)
+                # === RENDER & CONVERT TO GPU TENSORS ===
+                true_imgs = np.stack([render_from_params(p) for p in batch_params])  # [B, 224, 224, 3]
+                recon_imgs = np.stack([render_from_params(p) for p in batch_samples])  # [B, 224, 224, 3]
 
-                # Image-level metrics on [0,1]
-                psnr = peak_signal_noise_ratio(true_img, recon_img, data_range=1.0)
-                ssim = structural_similarity(true_img, recon_img, channel_axis=-1, data_range=1.0)
-                mse  = mean_squared_error(true_img, recon_img)
+                true_tensors = torch.stack([TF.to_tensor(i) for i in true_imgs]).to(device)  # [B,3,224,224]
+                recon_tensors = torch.stack([TF.to_tensor(i) for i in recon_imgs]).to(device)
 
-                # LPIPS on 64×64 float in [-1,1]
-                img1_lpips = F.interpolate((recon_tensor*2-1), size=(64, 64), mode='bilinear', align_corners=False).float()  # <<< EDITED
-                img2_lpips = F.interpolate((true_tensor*2-1), size=(64, 64), mode='bilinear', align_corners=False).float()  # <<< EDITED
-                lp = lpips_metric(img1_lpips, img2_lpips).item()
+                # === FOR KID (resize to 299x299 and convert to uint8) ===
+                true_299 = F.interpolate((true_tensors * 255).clamp(0, 255).to(torch.uint8),
+                                         size=(299, 299), mode='bilinear', align_corners=False)
+                recon_299 = F.interpolate((recon_tensors * 255).clamp(0, 255).to(torch.uint8),
+                                          size=(299, 299), mode='bilinear', align_corners=False)
 
-                sample_psnr.append(psnr)
-                sample_ssim.append(ssim)
-                sample_lpips.append(lp)
-                sample_mse.append(mse)
+                kid_metric.update(true_299, real=True)
+                kid_metric.update(recon_299, real=False)
 
-            # Average over all posterior samples for this dataset
-            all_psnr.append(np.mean(sample_psnr))
-            all_ssim.append(np.mean(sample_ssim))
-            all_lpips.append(np.mean(sample_lpips))
-            all_mses.append(np.mean(sample_mse))
+                # === FOR LPIPS (resize to 64x64, range [-1,1]) ===
+                true_lpips = F.interpolate((true_tensors * 2 - 1), size=(64, 64), mode='bilinear', align_corners=False)
+                recon_lpips = F.interpolate((recon_tensors * 2 - 1), size=(64, 64), mode='bilinear', align_corners=False)
+
+                # === LPIPS computation ===
+                lpips_vals = lpips_metric(true_lpips, recon_lpips).squeeze().cpu().numpy()  # [B]
+                all_lpips.extend(lpips_vals.tolist())
+
+                # === Other metrics (CPU, skimage) ===
+                for i in range(b_size):
+                    psnr = peak_signal_noise_ratio(true_imgs[i], recon_imgs[i], data_range=1.0)
+                    ssim = structural_similarity(true_imgs[i], recon_imgs[i], channel_axis=-1, data_range=1.0)
+                    mse = mean_squared_error(true_imgs[i], recon_imgs[i])
+                    all_psnr.append(psnr)
+                    all_ssim.append(ssim)
+                    all_mses.append(mse)
 
         toc = timeit.default_timer()
         duration = toc - tic
 
-        # Final KID score
+        # === KID RESULT ===
         kid_mean, kid_std = kid_metric.compute()
 
         print(
-            f"Theta: {theta:.3f}  "
-            f"PSNR: {np.mean(all_psnr):.2f} dB, "
-            f"SSIM: {np.mean(all_ssim):.3f}, "
-            f"LPIPS: {np.mean(all_lpips):.3f}, "
-            f"MSE: {np.mean(all_mses):.3f}, "
-            f"KID: {kid_mean.item():.4f}±{kid_std.item():.4f}"
+            f"Theta: {theta:.3f} | "
+            f"PSNR: {np.mean(all_psnr):.2f} dB | "
+            f"SSIM: {np.mean(all_ssim):.3f} | "
+            f"LPIPS: {np.mean(all_lpips):.3f} | "
+            f"MSE: {np.mean(all_mses):.6f} | "
+            f"KID: {kid_mean.item():.4f} ± {kid_std.item():.4f} | "
+            f"Time: {duration:.2f}s"
         )
