@@ -39,7 +39,7 @@ if physical_devices:
 
 """# Set up Forward Inference"""
 
-num_test = 1000
+num_test = 5000
 img_size=32
 
 # 2) Load ImageNette-160 instead of Fashion MNIST
