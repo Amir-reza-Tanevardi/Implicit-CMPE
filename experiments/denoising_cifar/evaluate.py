@@ -397,8 +397,9 @@ for key, trainer in trainer_dict.items():
                 if arg_dict[key].method == "cmpe":
                     batch_samples = []
                     for i in range(b_size):
+                        print(i)
                         sample = trainer.amortizer.sample(
-                            {"summary_conditions": batch_conditions[i, None]},
+                            {"summary_conditions": batch_conditions[i-1, None]},
                             n_steps=cmpe_steps,
                             n_samples=n_samples
                         )
