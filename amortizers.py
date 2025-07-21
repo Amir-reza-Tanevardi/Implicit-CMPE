@@ -753,7 +753,7 @@ class ConsistencyAmortizer(AmortizedPosterior):
                 t_n     = ts[n]     # current time
                 t_prev  = ts[n+1]   # next (smaller) time
 
-                t_p = 0.9*ts[n]
+                t_p = 1.0*ts[n]
 
                 # ← predict clean x₀:
                 x0_pred = self.consistency_function(
@@ -809,7 +809,7 @@ class ConsistencyAmortizer(AmortizedPosterior):
                   # print(x_var_0*((1-a)**2)/norm2)
                   # #print(x_var_0)
                   # print("")
-                  err_coef = 1.0 * tf.sqrt(a**2 + 0.1*x_var_0*((1-a)**2)/norm2)#*((1-a)**2)/(norm2))#*((1.0 - a)**2)/norm2) 
+                  err_coef = 1.0 * tf.sqrt(a**2 + 0.0*x_var_0*((1-a)**2)/norm2)#*((1-a)**2)/(norm2))#*((1.0 - a)**2)/norm2) 
                 #err_coef = 5.90*tf.sqrt(a**2 + 1.0*x_var*((a))/norm2)#*((1-a)**2)/(norm2))#*((1.0 - a)**2)/norm2) 
                 #err_coef = a
                 
