@@ -16,6 +16,7 @@ import pickle
 import timeit
 
 import tensorflow_datasets as tfds
+from argparse import Namespace
 
 import bayesflow as bf
 import matplotlib
@@ -25,7 +26,7 @@ import seaborn as sns
 import tensorflow as tf
 from bayesflow.computational_utilities import maximum_mean_discrepancy
 from tqdm.autonotebook import tqdm
-from train import build_trainer, configurator_blurred
+from train_ImageNet_denoising import build_trainer, configurator_blurred
 
 physical_devices = tf.config.list_physical_devices("GPU")
 if physical_devices:
@@ -38,6 +39,7 @@ if physical_devices:
 """# Set up Forward Inference"""
 
 num_test = 500
+img_size = 224
 
 # 2) Load ImageNette-160 instead of Fashion MNIST
 # ------------------------------------------------
@@ -47,7 +49,7 @@ def load_imagenette(split, img_size=160):
         image = tf.image.resize(image, [img_size, img_size])
         image = tf.cast(image, tf.float32) / 255.0
         image = image * 2.0 - 1.0
-        return image, label   # <<< return the label now
+        return image, label  
     return (
         ds
         .map(_prep, num_parallel_calls=tf.data.AUTOTUNE)
@@ -57,7 +59,7 @@ def load_imagenette(split, img_size=160):
 
 
 #train_ds = load_imagenette160("train[:5%]", img_size=160, batch_size=args.batch_size)  # <<< EDITED
-val_ds   = load_imagenette("validation", img_size=224)  # <<< EDITED
+val_ds   = load_imagenette("validation", img_size=img_size)  # <<< EDITED
 
 # <<< ADDED: unbatch then take only num_test examples
 test_ds_unbatched = val_ds.take(num_test)
@@ -112,18 +114,18 @@ def to_id(method, architecture, num_train):
     return f"{method}-{architecture}-{num_train}"
 
 checkpoint_path_dict = {
-    to_id("cmpe", "unet", 2000): "checkpoints/cmpe-unet-2000-25-04-03-093413/",
+    to_id("cmpe", "unet", 12000): "checkpoints/imagenet-unet-deblurring/",
     #to_id("cmpe", "unet", 60000): "checkpoints/cmpe-unet-60000-25-04-10-150038/",
 }
 
 arg_dict = {}
 for key, checkpoint_path in checkpoint_path_dict.items():
-    with open(os.path.join(checkpoint_path, "args.pickle"), "rb") as f:
+    with open(os.path.join(checkpoint_path, "args.pkl"), "rb") as f:
         arg_dict[key] = pickle.load(f)
 
 trainer_dict = {}
 for key, checkpoint_path in checkpoint_path_dict.items():
-    trainer_dict[key] = build_trainer(checkpoint_path, arg_dict[key])
+    trainer_dict[key] = build_trainer(checkpoint_path, Namespace(**arg_dict[key]))
 
 for key, trainer in trainer_dict.items():
     fig_dir = f"figures/{key}"
@@ -202,10 +204,10 @@ def create_mean_std_plots(
         samples = np.clip(samples, a_min=-1.01, a_max=1.01)
 
         # Plot truth and blurred
-        axarr[0,i].imshow((inp["parameters"].reshape(224,224,3)+1)/2)
-        axarr[1,i].imshow((inp["summary_conditions"].reshape(224,224,3)+1)/2)
-        axarr[2,i].imshow((samples.mean(0).reshape(224,224,3)+1)/2)
-        axarr[3,i].imshow((samples.std(0).reshape(224,224,3)+1)/2)
+        axarr[0,i].imshow((inp["parameters"].reshape(img_size,img_size,3)+1)/2)
+        axarr[1,i].imshow((inp["summary_conditions"].reshape(img_size,img_size,3)+1)/2)
+        axarr[2,i].imshow((samples.mean(0).reshape(img_size,img_size,3)+1)/2)
+        axarr[3,i].imshow((samples.std(0).reshape(img_size,img_size,3)+1)/2)
         axarr[0, i].set_title(class_names[i])
 
     for j, label in enumerate(y_labels):
@@ -227,18 +229,18 @@ def create_mean_std_plots(
         f.savefig(filepath, dpi=300, bbox_inches="tight")
     return f
 
-for key, trainer in trainer_dict.items():
-    print(key)
-    fig_dir = f"figures/{key}"
-    os.makedirs(fig_dir, exist_ok=True)
-    f = create_mean_std_plots(
-        trainer,
-        seed=42,
-        filepath=os.path.join(fig_dir, "main.pdf"),
-        method=arg_dict[key].method,
-        cmpe_steps=cmpe_steps,
-        fmpe_step_size=fmpe_step_size,
-    )
+# for key, trainer in trainer_dict.items():
+#     print(key)
+#     fig_dir = f"figures/{key}"
+#     os.makedirs(fig_dir, exist_ok=True)
+#     f = create_mean_std_plots(
+#         trainer,
+#         seed=42,
+#         filepath=os.path.join(fig_dir, "main.pdf"),
+#         method=arg_dict[key].method,
+#         cmpe_steps=cmpe_steps,
+#         fmpe_step_size=fmpe_step_size,
+#     )
 
 """## Per-Class Generation: Samples"""
 
@@ -266,11 +268,11 @@ def create_sample_plots(trainer, seed=42, filepath=None, cmpe_steps=30, fmpe_ste
         samples = np.clip(samples, a_min=-1.01, a_max=1.01)
 
         # Plot truth and blurred
-        axarr[0,i].imshow((inp["parameters"].reshape(224,224,3)+1)/2)
-        axarr[1,i].imshow((inp["summary_conditions"].reshape(224,224,3)+1)/2)
-        axarr[2,i].imshow((samples.mean(0).reshape(224,224,3)+1)/2)
+        axarr[0,i].imshow((inp["parameters"].reshape(img_size,img_size,3)+1)/2)
+        axarr[1,i].imshow((inp["summary_conditions"].reshape(img_size,img_size,3)+1)/2)
+        axarr[2,i].imshow((samples.mean(0).reshape(img_size,img_size,3)+1)/2)
         for j in range(n_samples):
-            axarr[i, 2 + j].imshow((samples[j].reshape(224,224,3)+1)/2)
+            axarr[i, 2 + j].imshow((samples[j].reshape(img_size,img_size,3)+1)/2)
 
         axarr[i, 0].set_ylabel(class_names[i], fontsize=12)
 
@@ -322,8 +324,13 @@ import lpips
 import numpy as np
 import timeit
 
+# === SETING SEEDS ===
+SEED = 42
+random.seed(SEED)
+np.random.seed(SEED)
+torch.manual_seed(SEED)
+
 # === CONFIG ===
-img_size = 224
 batch_size = 64
 n_samples = 1
 n_datasets = 1000
