@@ -39,7 +39,7 @@ if physical_devices:
 
 """# Set up Forward Inference"""
 
-num_test = 500
+num_test = 1000
 img_size=32
 
 # 2) Load ImageNette-160 instead of Fashion MNIST
@@ -351,7 +351,7 @@ torch.manual_seed(SEED)
 # === CONFIG ===
 batch_size = 64
 n_samples = 1
-n_datasets = 1000
+n_datasets = num_test
 
 # === DEVICE SETUP ===
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
