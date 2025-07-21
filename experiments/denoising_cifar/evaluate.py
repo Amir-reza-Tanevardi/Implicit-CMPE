@@ -393,11 +393,11 @@ for key, trainer in trainer_dict.items():
                 batch_params = parameters[b_start:b_end]
                 batch_conditions = conf["summary_conditions"][b_start:b_end]
 
+                print(b_size)
                 # === SAMPLE FROM MODEL ===
                 if arg_dict[key].method == "cmpe":
                     batch_samples = []
                     for i in range(b_size):
-                        print(i)
                         sample = trainer.amortizer.sample(
                             {"summary_conditions": batch_conditions[i-1, None]},
                             n_steps=cmpe_steps,
