@@ -420,6 +420,9 @@ for key, trainer in trainer_dict.items():
                 recon_299 = F.interpolate((recon_tensors * 255).clamp(0, 255),
                                           size=(299, 299), mode='bilinear', align_corners=False)
 
+                true_299 = true_299.to(torch.uint8)
+                recon_299 = recon_299.to(torch.uint8)
+
                 kid_metric.update(true_299, real=True)
                 kid_metric.update(recon_299, real=False)
 
