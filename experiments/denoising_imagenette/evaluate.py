@@ -268,9 +268,9 @@ def create_sample_plots(trainer, seed=42, filepath=None, cmpe_steps=30, fmpe_ste
         samples = np.clip(samples, a_min=-1.01, a_max=1.01)
 
         # Plot truth and blurred
-        axarr[0,i].imshow((inp["parameters"].reshape(img_size,img_size,3)+1)/2)
-        axarr[1,i].imshow((inp["summary_conditions"].reshape(img_size,img_size,3)+1)/2)
-        axarr[2,i].imshow((samples.mean(0).reshape(img_size,img_size,3)+1)/2)
+        axarr[i,0].imshow((inp["parameters"].reshape(img_size,img_size,3)+1)/2)
+        axarr[i,1].imshow((inp["summary_conditions"].reshape(img_size,img_size,3)+1)/2)
+        axarr[i,2].imshow((samples.mean(0).reshape(img_size,img_size,3)+1)/2)
         for j in range(n_samples):
             axarr[i, 2 + j].imshow((samples[j].reshape(img_size,img_size,3)+1)/2)
 
