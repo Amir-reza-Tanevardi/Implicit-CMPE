@@ -378,7 +378,7 @@ for key, trainer in trainer_dict.items():
     if arg_dict[key].method == "cmpe":
         c = conf["summary_conditions"][0, None]
         with torch.no_grad():
-            trainer.amortizer.sample_addim({"summary_conditions": c}, n_steps=cmpe_steps, n_samples=n_samples)
+            trainer.amortizer.sample({"summary_conditions": c}, n_steps=cmpe_steps, n_samples=n_samples)
 
     for theta in np.linspace(3, 3, 1):
         all_psnr, all_ssim, all_lpips, all_mses = [], [], [], []
@@ -397,7 +397,7 @@ for key, trainer in trainer_dict.items():
                 if arg_dict[key].method == "cmpe":
                     batch_samples = []
                     for i in range(b_size):
-                        sample = trainer.amortizer.sample_addim(
+                        sample = trainer.amortizer.sample(
                             {"summary_conditions": batch_conditions[i, None]},
                             n_steps=cmpe_steps,
                             n_samples=n_samples
