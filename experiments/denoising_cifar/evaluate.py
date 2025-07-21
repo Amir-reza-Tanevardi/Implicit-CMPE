@@ -420,7 +420,7 @@ for key, trainer in trainer_dict.items():
                             n_steps=cmpe_steps,
                             n_samples=n_samples,
                             c1=args.c1,
-                            c2=theta
+                            c2=args.c2
                         )
                         batch_samples.append(sample[0])
                     batch_samples = np.stack(batch_samples)  # shape: (b_size, D)
