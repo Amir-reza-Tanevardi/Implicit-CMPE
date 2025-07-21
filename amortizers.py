@@ -301,7 +301,7 @@ class ConsistencyAmortizer(AmortizedPosterior):
         self.input_dim = consistency_net.input_dim
         self.condition_dim = consistency_net.condition_dim
 
-        self.img_size = 224
+        self.img_size = 32
 
         self.student = consistency_net
         self.student.build(
