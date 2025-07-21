@@ -121,11 +121,11 @@ checkpoint_path_dict = {
 arg_dict = {}
 for key, checkpoint_path in checkpoint_path_dict.items():
     with open(os.path.join(checkpoint_path, "args.pkl"), "rb") as f:
-        arg_dict[key] = pickle.load(f)
+        arg_dict[key] = Namespace(**pickle.load(f))
 
 trainer_dict = {}
 for key, checkpoint_path in checkpoint_path_dict.items():
-    trainer_dict[key] = build_trainer(checkpoint_path, Namespace(**arg_dict[key]))
+    trainer_dict[key] = build_trainer(arg_dict[key])
 
 for key, trainer in trainer_dict.items():
     fig_dir = f"figures/{key}"
