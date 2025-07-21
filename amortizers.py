@@ -778,8 +778,8 @@ class ConsistencyAmortizer(AmortizedPosterior):
 
                 cc = tf.reshape(cond_rep0, (n_samples, self.input_dim))
                 x0_scaled = (np.clip(x0_pred, a_min=-1.00, a_max=1.00))
-                #cc = (1.00 + cc) / 2.00
-                x_var_0 = tf.norm((cc - ( self.blur(x0_scaled)) ), ord=2)**2 
+                cc = (1.00 + cc) / 2.00
+                x_var_0 = tf.norm((cc - (1.00 + self.blur(x0_scaled))/2.00 ), ord=2)**2 
                 x_var_1 = tf.norm((cc - x0_pred), ord=2)**2
                 x_var_2 = tf.norm((tf.reshape(cond_rep, (n_samples, self.input_dim)) - x0_pred), ord=2)**2
 
