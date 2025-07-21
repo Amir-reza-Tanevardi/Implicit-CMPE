@@ -415,9 +415,9 @@ for key, trainer in trainer_dict.items():
                 recon_tensors = torch.stack([TF.to_tensor(i) for i in recon_imgs]).to(device)
 
                 # === FOR KID (resize to 299x299 and convert to uint8) ===
-                true_299 = F.interpolate((true_tensors * 255).clamp(0, 255).to(torch.uint8),
+                true_299 = F.interpolate((true_tensors * 255).clamp(0, 255),
                                          size=(299, 299), mode='bilinear', align_corners=False)
-                recon_299 = F.interpolate((recon_tensors * 255).clamp(0, 255).to(torch.uint8),
+                recon_299 = F.interpolate((recon_tensors * 255).clamp(0, 255),
                                           size=(299, 299), mode='bilinear', align_corners=False)
 
                 kid_metric.update(true_299, real=True)
