@@ -301,6 +301,8 @@ class ConsistencyAmortizer(AmortizedPosterior):
         self.input_dim = consistency_net.input_dim
         self.condition_dim = consistency_net.condition_dim
 
+        self.img_size = 224
+
         self.student = consistency_net
         self.student.build(
             input_shape=(
@@ -487,7 +489,7 @@ class ConsistencyAmortizer(AmortizedPosterior):
           deblurred_tensor : tf.Tensor of shape [batch_size, 784]
               Deblurred image tensor (flattened 28x28).
           """
-          size = 28
+          size = self.img_size
           batch_size = tf.shape(blurred_tensor)[0]
 
           # Generate Gaussian PSF
@@ -635,7 +637,7 @@ class ConsistencyAmortizer(AmortizedPosterior):
       mask_size  : size of the square mask to apply on each image
       """
       batch_size = tf.shape(images)[0]
-      height = width = 28
+      height = width = self.img_size
 
       # Reshape to (batch_size, 28, 28)
       images_reshaped = tf.reshape(images, (batch_size, height, width))
@@ -672,14 +674,14 @@ class ConsistencyAmortizer(AmortizedPosterior):
 
     def blur(self, images):
         batch_size = tf.shape(images)[0]
-        height = width = 28
+        height = width = self.img_size
 
-        images_reshaped = tf.reshape(images, (batch_size, height, width))
+        images_reshaped = tf.reshape(images, (batch_size, height, width, 3))
 
         def grayscale_camera_np(image, noise="poisson", psf_width=2.5, noise_scale=1, noise_gain=0.5):
             image = noise_scale * image
             image = noise_gain * random_noise(image, mode=noise)
-            image = gaussian_filter(image, sigma=psf_width)
+            image = np.stack([gaussian_filter(image[..., c], sigma=psf_width) for c in range(3)], axis=-1)
             return image.astype(np.float32)
 
         def tf_wrapper(image):
@@ -691,14 +693,14 @@ class ConsistencyAmortizer(AmortizedPosterior):
 
         masked_images = tf.map_fn(tf_wrapper, images_reshaped)
 
-        return tf.reshape(masked_images, (batch_size, height * width))
+        return tf.reshape(masked_images, (batch_size, self.input_dim))
         
     
 
     def sample_addim(self,
            input_dict,
            n_samples,
-           n_steps: int = 10,
+           n_steps: int = 2,
            theta = 0.9,
            eta: float = 0.0,           # ← new hyperparameter
            to_numpy: bool = True,
@@ -774,11 +776,12 @@ class ConsistencyAmortizer(AmortizedPosterior):
                 # x_var_2 = 0.1 /(2 + t_p**2)
                 
 
-                cc = tf.reshape(cond_rep0, (n_samples, 784))
-                x0_scaled = (1.00 + np.clip(x0_pred, a_min=-1.00, a_max=1.00))/2.00
-                x_var_0 = tf.norm((cc - self.blur(x0_scaled)), ord=2)**2 
+                cc = tf.reshape(cond_rep0, (n_samples, self.input_dim))
+                x0_scaled = (np.clip(x0_pred, a_min=-1.00, a_max=1.00))
+                #cc = (1.00 + cc) / 2.00
+                x_var_0 = tf.norm((cc - ( self.blur(x0_scaled)) ), ord=2)**2 
                 x_var_1 = tf.norm((cc - x0_pred), ord=2)**2
-                x_var_2 = tf.norm((tf.reshape(cond_rep, (n_samples, 784)) - x0_pred), ord=2)**2
+                x_var_2 = tf.norm((tf.reshape(cond_rep, (n_samples, self.input_dim)) - x0_pred), ord=2)**2
 
 
                 #print(f"x_var: {x_var}")
@@ -797,12 +800,16 @@ class ConsistencyAmortizer(AmortizedPosterior):
                   err_coef = 0
                 else:
                   # print(a**2)
-                  # print(tf.reshape(cond_rep0, (n_samples, 784)))
-                  # print(x0_pred)
-                  # print(28*x_var*((1-a)**2)/norm2)
-                  #print(x_var_0)
-                  #print("")
-                  err_coef = 0.9*tf.sqrt(a**2 + 1.3*x_var_2*((1-a)**2)/norm2)#*((1-a)**2)/(norm2))#*((1.0 - a)**2)/norm2) 
+                  # print(tf.reduce_min(x0_pred).numpy())
+                  # print(tf.reduce_max(x0_pred).numpy())
+                  # print(tf.reduce_min(self.blur(x0_scaled)).numpy())
+                  # print(tf.reduce_max(self.blur(x0_scaled)).numpy())
+                  # print(tf.reduce_min(cc).numpy())
+                  # print(tf.reduce_max(cc).numpy())
+                  # print(x_var_0*((1-a)**2)/norm2)
+                  # #print(x_var_0)
+                  # print("")
+                  err_coef = 0.9 * tf.sqrt(a**2 + 1.0*x_var_0*((1-a)**2)/norm2)#*((1-a)**2)/(norm2))#*((1.0 - a)**2)/norm2) 
                 #err_coef = 5.90*tf.sqrt(a**2 + 1.0*x_var*((a))/norm2)#*((1-a)**2)/(norm2))#*((1.0 - a)**2)/norm2) 
                 #err_coef = a
                 
@@ -822,7 +829,7 @@ class ConsistencyAmortizer(AmortizedPosterior):
                 else:
                     x = x_mean
 
-            out.append(x)
+            out.append(self.blur(x0_scaled))
 
         # stack and possibly squeeze
         post = tf.stack(out, axis=0)  # (n_data, n_samples, input_dim)
