@@ -400,7 +400,7 @@ class ConsistencyAmortizer(AmortizedPosterior):
         cskip = self.sigma2 / ((t - self.eps) ** 2 + self.sigma2)
         cout = self.sigma * (t - self.eps) / (tf.math.sqrt(self.sigma2 + t**2))
 
-        out = cskip * x + cout * F
+        out = cskip[:, None, None] * x + cout[:, None, None] * F
         return out
 
     def compute_loss(self, input_dict, **kwargs):
