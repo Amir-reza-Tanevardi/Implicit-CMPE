@@ -366,12 +366,7 @@ class ConsistencyAmortizer(AmortizedPosterior):
         target_vars = input_dict[defaults.DEFAULT_KEYS["parameters"]]
 
         # Compute output
-        print("")
-        print(f"target_vars in call: {target_vars.shape}")
-        print(f"t in call: {t[:, None, None, None].shape}")
-        print(f"z in call: {z.shape}")
-        inp = target_vars + t[:, None, None, None] * z
-        print(f"inp in call: {inp.shape}")
+        inp = target_vars + t[:, None, None] * z
         net_out = self.consistency_function(inp, full_cond, t, **kwargs)
 
         # Return summary outputs or not, depending on parameter
