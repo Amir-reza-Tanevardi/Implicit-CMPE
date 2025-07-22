@@ -227,9 +227,9 @@ def build_unet_model(img_size, channels, widths, has_attention, tmax,
             skips.append(x)
 
     # Middle
-    x = ResidualBlock(widths[-1], , groups=norm_groups, activation_fn=activation_fn)([x, temb])
+    x = ResidualBlock(widths[-1],  groups=norm_groups, activation_fn=activation_fn)([x, temb])
     x = AttentionBlock(widths[-1],  groups=norm_groups)(x)
-    x = ResidualBlock(widths[-1], , groups=norm_groups, activation_fn=activation_fn)([x, temb])
+    x = ResidualBlock(widths[-1], groups=norm_groups, activation_fn=activation_fn)([x, temb])
 
     # Up path
     for i in reversed(range(len(widths))):
