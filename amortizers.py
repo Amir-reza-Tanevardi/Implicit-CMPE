@@ -457,10 +457,6 @@ class ConsistencyAmortizer(AmortizedPosterior):
         # weighting function, see https://arxiv.org/pdf/2310.14189.pdf, Section 3.1
         lam = 1 / (t2 - t1)
         # Pseudo-huber loss, see https://arxiv.org/pdf/2310.14189.pdf, Section 3.3
-        print("")
-        print(f"lam: {lam.shape}")
-        print(f"self.c_huber2 {self.c_huber2.shape}")
-        print(f"self.c_huber: {self.c_huber.shape}")
         loss = tf.reduce_mean(lam[:, None, None] * (tf.sqrt(tf.square(teacher_out - student_out) + self.c_huber2) - self.c_huber))
 
         # Case summary loss should be computed
