@@ -63,7 +63,7 @@ def configurator_blurred(f):
     """
     B, H, W, C = f['prior_draws'].shape
     # Flatten parameters (already normalized)
-    p = f['prior_draws'].reshape(B, -1).astype(np.float32)
+    p = f['prior_draws'].astype(np.float32)
     # Create blurred summary conditions
     blurred = np.stack([grayscale_camera_rgb(f['sim_data'][b]) for b in range(B)], axis=0).astype(np.float32)
     return {'parameters': p, 'summary_conditions': blurred}
@@ -197,28 +197,29 @@ def TimeMLP(units, activation_fn=keras.activations.swish):
 # --- U-Net Model ---
 
 def build_unet_model(img_size, channels, widths, has_attention, tmax,
-                     cond_dim=128, num_res_blocks=2, norm_groups=8,
-                     first_channels=64):
-    image_input = layers.Input(shape=(img_size*img_size*channels,), name='image_input')
+                     cond_dim=256, num_res_blocks=4, norm_groups=8,
+                     first_channels=64, interpolation="nearest",
+    activation_fn=keras.activations.swish):
+        
+    image_input = layers.Input(shape=(img_size,img_size,channels), name='image_input')
     x = layers.Reshape((img_size, img_size, channels))(image_input)
     time_input = layers.Input(shape=(), name='time_input', dtype=tf.float32)
     cond_input = layers.Input(shape=(cond_dim,), name='condition_input')
 
     # Initial conv
-    x0 = layers.Conv2D(first_channels, 3, padding='same', kernel_initializer=kernel_init(1.0))(x)
+    x0 = layers.Conv2D(first_channels, kernel_size=(3, 3), padding='same', kernel_initializer=kernel_init(1.0))(x)
 
     # Time embedding
     temb = TimeEmbedding(first_channels*4, tmax)(time_input)
-    temb = layers.Dense(first_channels*4, activation='swish')(temb)
-    temb = layers.Dense(first_channels*4)(temb)
-    temb = layers.Concatenate()([temb, cond_input])
+    temb = TimeMLP(units=first_channels * 4, activation_fn=activation_fn)(temb)
+    temb = layers.Concatenate(axis=-1)([temb, cond_input])
 
     # Down path
     skips = [x0]
     x = x0
     for i, w in enumerate(widths):
         for _ in range(num_res_blocks):
-            x = ResidualBlock(w, norm_groups)([x, temb])
+            x = ResidualBlock(w, norm_groups, activation_fn=activation_fn)([x, temb])
             if has_attention[i]: x = AttentionBlock(w, norm_groups)(x)
             skips.append(x)
         if i < len(widths)-1:
@@ -226,26 +227,27 @@ def build_unet_model(img_size, channels, widths, has_attention, tmax,
             skips.append(x)
 
     # Middle
-    x = ResidualBlock(widths[-1], norm_groups)([x, temb])
-    x = AttentionBlock(widths[-1], norm_groups)(x)
-    x = ResidualBlock(widths[-1], norm_groups)([x, temb])
+    x = ResidualBlock(widths[-1], , groups=norm_groups, activation_fn=activation_fn)([x, temb])
+    x = AttentionBlock(widths[-1],  groups=norm_groups)(x)
+    x = ResidualBlock(widths[-1], , groups=norm_groups, activation_fn=activation_fn)([x, temb])
 
     # Up path
     for i in reversed(range(len(widths))):
         for _ in range(num_res_blocks+1):
-            x = layers.Concatenate()([x, skips.pop()])
-            x = ResidualBlock(widths[i], norm_groups)([x, temb])
+            x = layers.Concatenate(axis=-1)([x, skips.pop()])
+            x = ResidualBlock(widths[i], groups=norm_groups, activation_fn=activation_fn)([x, temb])
             if has_attention[i]: x = AttentionBlock(widths[i], norm_groups)(x)
-        if i>0:
-            x = UpSample(widths[i])(x)
+        if i != 0:
+            x = UpSample(widths[i], interpolation=interpolation)(x)
 
     # Output conv
     x = layers.GroupNormalization(norm_groups)(x)
     x = layers.Activation('swish')(x)
-    x = layers.Conv2D(channels, 3, padding='same', kernel_initializer=kernel_init(0.0))(x)
-    out = layers.Flatten()(x)
+    x = layers.Conv2D(channels, (3, 3), padding='same', kernel_initializer=kernel_init(0.0))(x)
+    out = x
+    #out = layers.Flatten()(x)
 
-    model = keras.Model([image_input, cond_input, time_input], out, name='imagenet_unet')
+    model = keras.Model([image_input, cond_input, time_input], out, name='cifar_unet')
     model.latent_dim = img_size*img_size*channels
     model.input_dim = img_size*img_size*channels
     model.condition_dim = cond_dim
@@ -256,17 +258,17 @@ def build_unet_model(img_size, channels, widths, has_attention, tmax,
 def build_trainer(checkpoint_path, args, forward_train=None):
     img_size = args.img_size
     channels = 3
-    cond_dim = 128
+    cond_dim = 256
 
     # Build summary network
     summary_net = keras.Sequential([
-        layers.Conv2D(64,3,activation='relu',padding='same', input_shape=(img_size,img_size,channels)),
+        layers.Conv2D(64,(3,3),activation='relu',padding='same', kernel_initializer="he_normal", input_shape=(img_size,img_size,channels), kernel_regularizer=tf.keras.regularizers.l2(1e-5)),
         layers.GroupNormalization(args.norm_groups),
-        layers.Conv2D(64,3,activation='relu',padding='same'),
+        layers.Conv2D(64,(3,3),activation='relu',padding='same', kernel_initializer="he_normal", kernel_regularizer=tf.keras.regularizers.l2(1e-5)),
         layers.GroupNormalization(args.norm_groups),
-        layers.Conv2D(128,3,activation='relu',padding='same'),
+        layers.Conv2D(128,(3,3),activation='relu',padding='same', kernel_initializer="he_normal", kernel_regularizer=tf.keras.regularizers.l2(1e-5)),
         layers.GroupNormalization(args.norm_groups),
-        layers.Conv2D(128,3,activation='relu',padding='same'),
+        layers.Conv2D(128,(3,3),activation='relu',padding='same', kernel_initializer="he_normal", kernel_regularizer=tf.keras.regularizers.l2(1e-5)),
         layers.GroupNormalization(args.norm_groups),
         layers.GlobalAveragePooling2D()
     ])
@@ -278,7 +280,8 @@ def build_trainer(checkpoint_path, args, forward_train=None):
                             tmax=args.tmax, cond_dim=cond_dim,
                             num_res_blocks=args.res_blocks,
                             norm_groups=args.norm_groups,
-                            first_channels=args.base_channels)
+                            first_channels=args.base_channels,
+                            activation_fn=keras.activations.swish)
 
     
     batch_size = args.batch_size
@@ -303,6 +306,7 @@ def build_trainer(checkpoint_path, args, forward_train=None):
         summary_net=summary_net,
         num_steps=args.num_steps,
         sigma2=args.sigma2,
+        summary_loss_fun="MMD"
         eps=args.epsilon,
         T_max=args.tmax,
         s0=args.s0,
@@ -348,18 +352,18 @@ if __name__=='__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--img-size', type=int, default=32)
     parser.add_argument('--batch-size', type=int, default=64)
-    parser.add_argument('--initial-learning-rate', type=float, default=1e-4)
+    parser.add_argument('--initial-learning-rate', type=float, default=5e-4)
     parser.add_argument('--num-steps', type=int, default=100000)
-    parser.add_argument("--num-training", type=int, default=45000)
-    parser.add_argument("--lr-adapt", type=str, default="none", choices=["none", "cosine"])
+    parser.add_argument("--num-training", type=int, default=49000)
+    parser.add_argument("--lr-adapt", type=str, default="cosine", choices=["none", "cosine"])
     parser.add_argument('--tmax', type=float, default=1000.0)
     parser.add_argument('--epsilon', type=float, default=1e-3)
     parser.add_argument('--s0', type=int, default=10)
     parser.add_argument('--s1', type=int, default=50)
     parser.add_argument('--sigma2', type=float, default=0.25)
-    parser.add_argument('--res-blocks', type=int, default=2)
+    parser.add_argument('--res-blocks', type=int, default=4)
     parser.add_argument('--norm-groups', type=int, default=8)
-    parser.add_argument('--base-channels', type=int, default=64)
+    parser.add_argument('--base-channels', type=int, default=128)
     parser.add_argument("--optimizer", type=str, default="adamw")
     parser.add_argument('--fine-tune-summary', action='store_true')
     parser.add_argument("--method", type=str, default="cmpe", choices=["cmpe", "fmpe"])
@@ -391,15 +395,15 @@ if __name__=='__main__':
     forward_val = {'prior_draws': train_imgs[args.num_training:],
          'sim_data': train_imgs[args.num_training:]}
     
-    # checkpoint_path = os.path.join(
-    #     "checkpoints",
-    #     f"cifar10-deblurring-{args.method}-{args.architecture}-{args.num_training}-{datetime.datetime.today():%y-%m-%d-%H%M%S}",
-    # )
-
     checkpoint_path = os.path.join(
         "checkpoints",
-        f"cifar10-deblurring-cmpe-unet-45000-25-07-14-113153",
+        f"cifar10-deblurring-{args.method}-{args.architecture}-{args.num_training}-{datetime.datetime.today():%y-%m-%d-%H%M%S}",
     )
+
+    # checkpoint_path = os.path.join(
+    #     "checkpoints",
+    #     f"cifar10-deblurring-cmpe-unet-45000-25-07-14-113153",
+    # )
 
     trainer, optimizer, num_epochs, batch_size = build_trainer(checkpoint_path, args, forward_train=forward_train)
 
