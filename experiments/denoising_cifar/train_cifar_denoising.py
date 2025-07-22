@@ -197,7 +197,7 @@ def TimeMLP(units, activation_fn=keras.activations.swish):
 # --- U-Net Model ---
 
 def build_unet_model(img_size, channels, widths, has_attention, tmax,
-                     cond_dim=256, num_res_blocks=4, norm_groups=8,
+                     cond_dim=128, num_res_blocks=4, norm_groups=8,
                      first_channels=64, interpolation="nearest",
     activation_fn=keras.activations.swish):
         
@@ -258,7 +258,7 @@ def build_unet_model(img_size, channels, widths, has_attention, tmax,
 def build_trainer(checkpoint_path, args, forward_train=None):
     img_size = args.img_size
     channels = 3
-    cond_dim = 256
+    cond_dim = 128
 
     # Build summary network
     summary_net = keras.Sequential([
