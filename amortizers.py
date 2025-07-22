@@ -366,7 +366,7 @@ class ConsistencyAmortizer(AmortizedPosterior):
         target_vars = input_dict[defaults.DEFAULT_KEYS["parameters"]]
 
         # Compute output
-        inp = target_vars + t * z
+        inp = target_vars + t[:, None, None, None] * z
         net_out = self.consistency_function(inp, full_cond, t, **kwargs)
 
         # Return summary outputs or not, depending on parameter
