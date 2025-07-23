@@ -764,7 +764,7 @@ class ConsistencyAmortizer(AmortizedPosterior):
                 )
                 
                 s = tf.random.normal((n_samples, self.img_size, self.img_size, 3))
-                x = x0_pred + t_p[:, None, None] * s
+                x = x0_pred + t_p * s
 
                 #print(x0_pred.shape)
 
