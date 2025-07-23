@@ -885,7 +885,7 @@ class ConsistencyAmortizer(AmortizedPosterior):
             for n in range(len(ts)-1):
                 t_n     = ts[n]     # current time
                 t_prev  = ts[n+1]   # next (smaller) time
-                t_p = 0.9*ts[n]
+                t_p = 0.9*ts[n][:, None, None]
 
                 # ← predict clean x₀:
                 x0_pred = self.consistency_function(
@@ -893,7 +893,7 @@ class ConsistencyAmortizer(AmortizedPosterior):
                     tf.fill((n_samples,1), t_n)
                 )
                 
-                s = tf.random.normal((n_samples, self.input_dim))
+                s = tf.random.normal((n_samples, self.img_size, self.img_size, 3))
                 x = x0_pred + t_p * s
 
                 # ← compute σ_{n-1} and the “α” coefficient a = sqrt((t_prev² − σ²)/t_n²)
@@ -903,12 +903,12 @@ class ConsistencyAmortizer(AmortizedPosterior):
                 a = tf.sqrt((t_prev**2 - sigma**2) / (t_p**2))
 
                 # ← the DDIM mean:
-                x_mean = a * x + (1.0 - a) * x0_pred
+                x_mean = a[:, None, None] * x + (1.0 - a)[:, None, None] * x0_pred
 
                 # ← add noise (if η>0)
                 if eta > 0:
-                    z = tf.random.normal((n_samples, self.input_dim))
-                    x = x_mean + sigma * z
+                    z = tf.random.normal((n_samples, self.img_size, self.img_size, 3))
+                    x = x_mean + sigma[:, None, None] * z
                 else:
                     x = x_mean
 
@@ -959,19 +959,19 @@ class ConsistencyAmortizer(AmortizedPosterior):
 
         assert condition_dim == self.condition_dim
 
-        post_samples = np.empty(shape=(n_data_sets, n_samples, self.input_dim), dtype=np.float32)
+        post_samples = np.empty(shape=(n_data_sets, n_samples, self.img_size, self.img_size, 3), dtype=np.float32)
         n_data_sets, condition_dim = conditions.shape
 
         for i in range(n_data_sets):
             c = conditions[i, None]
             c_rep = tf.concat([c] * n_samples, axis=0)
             discretized_time = tf.reverse(discretize_time(self.eps, self.T_max, n_steps), axis=[-1])
-            z_init = tf.random.normal((n_samples, self.input_dim), stddev=self.T_max)
+            z_init = tf.random.normal((n_samples, self.img_size, self.img_size, 3), stddev=self.T_max)
             T = discretized_time[0] + tf.zeros((n_samples, 1))
             samples = self.consistency_function(z_init, c_rep, T)
             for n in range(1, n_steps):
-                z = tf.random.normal((n_samples, self.input_dim))
-                x_n = samples + tf.math.sqrt(discretized_time[n] ** 2 - self.eps**2) * z
+                z = tf.random.normal((n_samples, self.img_size, self.img_size, 3))
+                x_n = samples + tf.math.sqrt(discretized_time[n] ** 2 - self.eps**2)[:, None, None] * z
                 samples = self.consistency_function(x_n, c_rep, discretized_time[n] + tf.zeros((n_samples, 1)))
             post_samples[i] = samples
 
