@@ -249,7 +249,7 @@ def build_unet_model(img_size, channels, widths, has_attention, tmax,
 
     model = keras.Model([image_input, cond_input, time_input], out, name='cifar_unet')
     model.latent_dim = img_size*img_size*channels
-    model.input_dim = (img_size,img_size,channels)
+    model.input_dim = img_size*img_size*channels
     model.condition_dim = cond_dim
     return model
 
