@@ -395,15 +395,15 @@ if __name__=='__main__':
     forward_val = {'prior_draws': train_imgs[args.num_training:],
          'sim_data': train_imgs[args.num_training:]}
     
-    checkpoint_path = os.path.join(
-        "checkpoints",
-        f"cifar10-deblurring-{args.method}-{args.architecture}-{args.num_training}-{datetime.datetime.today():%y-%m-%d-%H%M%S}",
-    )
-
     # checkpoint_path = os.path.join(
     #     "checkpoints",
-    #     f"cifar10-deblurring-cmpe-unet-45000-25-07-14-113153",
+    #     f"cifar10-deblurring-{args.method}-{args.architecture}-{args.num_training}-{datetime.datetime.today():%y-%m-%d-%H%M%S}",
     # )
+
+    checkpoint_path = os.path.join(
+        "checkpoints",
+        f"cifar10-deblurring-cmpe-unet-49000-25-07-22-074548",
+    )
 
     trainer, optimizer, num_epochs, batch_size = build_trainer(checkpoint_path, args, forward_train=forward_train)
 
