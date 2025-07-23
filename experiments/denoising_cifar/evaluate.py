@@ -286,6 +286,7 @@ def create_sample_plots(trainer, seed=42, filepath=None, cmpe_steps=30, fmpe_ste
     titles = [r"Param. $\theta$", r"Obs. $x$"] + n_samples * ["Sample"]
     for i, (c, idx) in tqdm(enumerate(idx_dict.items()), total=len(idx_dict)):
         # Prepare input dict for network
+        print(f"HERE: {conf["parameters"][idx : (idx + 1)].shape}")
         inp = {
             "parameters": conf["parameters"][idx : (idx + 1)],
             "summary_conditions": conf["summary_conditions"][idx : (idx + 1)],
