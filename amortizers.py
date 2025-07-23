@@ -748,7 +748,7 @@ class ConsistencyAmortizer(AmortizedPosterior):
             #print(cond_rep.shape) 
             # 3) sample initial x_{t_N} ∼ Normal(0, t_N^2 I)
             t_N = ts[0]
-            x = tf.random.normal((n_samples, self.input_dim)) #* t_N
+            x = tf.random.normal((n_samples, self.img_size, self.img_size, 3)) #* t_N
 
             # 4) DDIM loop
             for n in range(len(ts)-1):
@@ -971,7 +971,7 @@ class ConsistencyAmortizer(AmortizedPosterior):
             samples = self.consistency_function(z_init, c_rep, T)
             for n in range(1, n_steps):
                 z = tf.random.normal((n_samples, self.img_size, self.img_size, 3))
-                x_n = samples + tf.math.sqrt(discretized_time[n] ** 2 - self.eps**2)[:, None, None] * z
+                x_n = samples + tf.math.sqrt(discretized_time[n] ** 2 - self.eps**2) * z
                 samples = self.consistency_function(x_n, c_rep, discretized_time[n] + tf.zeros((n_samples, 1)))
             post_samples[i] = samples
 
