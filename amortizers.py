@@ -693,7 +693,7 @@ class ConsistencyAmortizer(AmortizedPosterior):
 
         masked_images = tf.map_fn(tf_wrapper, images_reshaped)
 
-        return tf.reshape(masked_images, (batch_size, self.input_dim))
+        return tf.reshape(masked_images, (batch_size, self.img_size, self.img_size, 3))
         
     
 
