@@ -783,7 +783,7 @@ class ConsistencyAmortizer(AmortizedPosterior):
                 cc = (1.00 + cc) / 2.00
                 x_var_0 = tf.norm((cc - (1.00 + self.blur(x0_scaled))/2.00 ), ord=2)**2 
                 x_var_1 = tf.norm((cc - x0_pred), ord=2)**2
-                x_var_2 = tf.norm((tf.reshape(cond_rep, (n_samples, self.input_dim)) - x0_pred), ord=2)**2
+                x_var_2 = tf.norm((tf.reshape(cond_rep, (n_samples, self.img_size, self.img_size, 3)) - x0_pred), ord=2)**2
 
 
                 #print(f"x_var: {x_var}")
@@ -826,7 +826,7 @@ class ConsistencyAmortizer(AmortizedPosterior):
 
                 # ← add noise (if η>0)
                 if eta > 0:
-                    z = tf.random.normal((n_samples, self.input_dim))
+                    z = tf.random.normal((n_samples, self.img_size, self.img_size, 3))
                     x = x_mean + sigma * z
                 else:
                     x = x_mean
