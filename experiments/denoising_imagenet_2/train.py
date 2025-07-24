@@ -296,7 +296,8 @@ class UNetModel(keras.Model):
 
         # build encoder blocks
         self.input_blocks = []
-        ch = model_channels
+        ch = model_channels * mult[0]
+        input_block_chans = [ch]
         ds = 1
         for level, mult in enumerate(channel_mult):
             for _ in range(num_res_blocks):
@@ -308,8 +309,10 @@ class UNetModel(keras.Model):
                 ch = mult * model_channels
                 if ds in attention_resolutions:
                     self.input_blocks.append(AttentionBlock(ch, num_heads=1))
+                input_block_chans.append(ch)        
             if level != len(channel_mult)-1:
                 self.input_blocks.append(Downsample(ch, use_conv_resample))
+                input_block_chans.append(ch)
                 ds *= 2
 
         # middle
@@ -323,8 +326,11 @@ class UNetModel(keras.Model):
         self.output_blocks = []
         for level, mult in list(enumerate(channel_mult))[::-1]:
             for i in range(num_res_blocks+1):
+                ich = input_block_chans.pop()
+                print(f"mult*model_channels in decoder: {mult*model_channels}")
+                print(f"ch + ich: {ch + ich}")
                 self.output_blocks.append(
-                    ResBlock(ch + (mult*model_channels), time_embed_dim, dropout,
+                    ResBlock(ch + ich, time_embed_dim, dropout,
                              out_channels=mult*model_channels,
                              use_conv=use_conv_resample)
                 )
