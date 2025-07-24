@@ -370,6 +370,8 @@ class UNetModel(keras.Model):
         for layer in self.output_blocks:
             if isinstance(layer, ResBlock):
                 skip = hs.pop()
+                if h.shape[1] != skip.shape[1] or h.shape[2] != skip.shape[2]:
+                    raise ValueError(f"Shape mismatch in skip connection: {h.shape} vs {skip.shape}")
                 h = tf.concat([h, skip], axis=-1)
                 h = layer(h, emb)
             else:
