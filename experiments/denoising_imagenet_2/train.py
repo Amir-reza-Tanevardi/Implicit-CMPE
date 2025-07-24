@@ -327,8 +327,6 @@ class UNetModel(keras.Model):
         for level, mult in list(enumerate(channel_mult))[::-1]:
             for i in range(num_res_blocks):
                 ich = input_block_chans.pop()
-                print(f"mult*model_channels in decoder: {mult*model_channels}")
-                print(f"ch + ich: {ch + ich}")
                 self.output_blocks.append(
                     ResBlock(ch + ich, time_embed_dim, dropout,
                              out_channels=mult*model_channels,
@@ -362,9 +360,6 @@ class UNetModel(keras.Model):
             if isinstance(layer, ResBlock):
                 h = layer(h, emb)
                 hs.append(h)
-                print(f"h in input: {h.shape}")
-                print(f"hs in input: {len(hs)}")
-                print("")
             else:
                 h = layer(h)
             
@@ -381,9 +376,6 @@ class UNetModel(keras.Model):
                 skip = hs.pop()
                 if h.shape[1] != skip.shape[1] or h.shape[2] != skip.shape[2]:
                     raise ValueError(f"Shape mismatch in skip connection: {h.shape} vs {skip.shape}")
-                print(f"h in output: {h.shape}") 
-                print(f"skip in output: {skip.shape}")
-                print("")
                 h = tf.concat([h, skip], axis=-1)
                 h = layer(h, emb)
             else:
