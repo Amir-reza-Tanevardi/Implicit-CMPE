@@ -296,7 +296,7 @@ class UNetModel(keras.Model):
 
         # build encoder blocks
         self.input_blocks = []
-        ch = model_channels * mult[0]
+        ch = model_channels * channel_mult[0]
         input_block_chans = [ch]
         ds = 1
         for level, mult in enumerate(channel_mult):
