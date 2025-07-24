@@ -355,10 +355,10 @@ class UNetModel(keras.Model):
         for layer in self.input_blocks:
             if isinstance(layer, ResBlock):
                 h = layer(h, emb)
+                hs.append(h)
             else:
                 h = layer(h)
-            hs.append(h)
-
+            
         # middle
         for layer in self.middle:
             if isinstance(layer, ResBlock):
