@@ -357,7 +357,7 @@ class UNetModel(keras.Model):
                 h = layer(h, emb)
                 hs.append(h)
                 print(f"h in input: {h.shape}")
-                print(f"hs in input: {hs.shape}")
+                print(f"hs in input: {len(hs)}")
                 print("")
             else:
                 h = layer(h)
