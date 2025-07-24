@@ -31,7 +31,7 @@ def load_imagenet(img_size, split):
 
     ds = tfds.load('imagenette', split=split, as_supervised=True, data_dir = "/work/pi_aghasemi_umass_edu/afzali_umass/W2S/.cache")
     ds = ds.map(_preprocess, num_parallel_calls=tf.data.AUTOTUNE)
-    ds = ds.shuffle(1024).prefetch(tf.data.AUTOTUNE)
+    #ds = ds.shuffle(1024).prefetch(tf.data.AUTOTUNE)
     return ds
 
 # --- Masking and Corruption ---
