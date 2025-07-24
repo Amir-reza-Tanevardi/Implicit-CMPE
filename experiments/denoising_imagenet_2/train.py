@@ -338,7 +338,7 @@ class UNetModel(keras.Model):
         self.out_act  = layers.Activation('swish')
         self.out = zero_conv(ch, out_channels)
 
-    def call(self, x, cond_input=None, timesteps):
+    def call(self, x, cond_input, timesteps):
         # x: [B,H,W,C], timesteps: [B], cond_input: [B,cond_dim]
         # embed time + cond
         emb = self.time_embed(timesteps)                 # [B, Tdim]
