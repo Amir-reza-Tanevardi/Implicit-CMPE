@@ -65,7 +65,7 @@ def configurator_blurred(f):
     """
     B, H, W, C = f['prior_draws'].shape
     # Flatten parameters (already normalized)
-    p = f['prior_draws'].reshape(B, -1).astype(np.float32)
+    p = f['prior_draws'].astype(np.float32)
     # Create blurred summary conditions
     blurred = np.stack([grayscale_camera_rgb(f['sim_data'][b]) for b in range(B)], axis=0).astype(np.float32)
     return {'parameters': p, 'summary_conditions': blurred}
