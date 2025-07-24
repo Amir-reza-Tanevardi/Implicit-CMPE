@@ -514,6 +514,7 @@ if __name__=='__main__':
     parser.add_argument('--initial-learning-rate', type=float, default=5e-4)
     parser.add_argument('--num-steps', type=int, default=100000)
     parser.add_argument("--num-training", type=int, default=12000)
+    parser.add_argument("--num-val", type=int, default=50)
     parser.add_argument("--lr-adapt", type=str, default="none", choices=["none", "cosine"])
     parser.add_argument('--tmax', type=float, default=1000.0)
     parser.add_argument('--epsilon', type=float, default=1e-3)
@@ -542,7 +543,7 @@ if __name__=='__main__':
     val_ds   = load_imagenet(args.img_size, 'validation')
     
     train_ds_unbatched = train_ds.take(args.num_training)
-    val_ds_unbatched = val_ds.take(10)
+    val_ds_unbatched = val_ds.take(args.num_val)
     
     train_imgs = []
     train_lbls = []
