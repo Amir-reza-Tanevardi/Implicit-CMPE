@@ -245,7 +245,7 @@ class Downsample(layers.Layer):
 class Upsample(layers.Layer):
     def __init__(self, channels, use_conv=True):
         super().__init__()
-        self.ups = layers.UpSampling2D(interpolation='nearest')
+        self.ups = layers.UpSampling2D(size=(2, 2), interpolation='nearest')
         if use_conv:
             self.conv = layers.Conv2D(channels, 3, padding='same',
                                       kernel_initializer=default_init(1.0))
@@ -325,7 +325,7 @@ class UNetModel(keras.Model):
         # decoder
         self.output_blocks = []
         for level, mult in list(enumerate(channel_mult))[::-1]:
-            for i in range(num_res_blocks+1):
+            for i in range(num_res_blocks):
                 ich = input_block_chans.pop()
                 print(f"mult*model_channels in decoder: {mult*model_channels}")
                 print(f"ch + ich: {ch + ich}")
