@@ -128,8 +128,9 @@ class QKVAttention(layers.Layer):
         scale = 1.0 / tf.sqrt(tf.sqrt(tf.cast(head_dim, tf.float32)))
         q = tf.reshape(q * scale, [B*self.n_heads, head_dim, N])
         k = tf.reshape(k * scale, [B*self.n_heads, head_dim, -1])
+        v = tf.reshape(v, [B * self.n_heads, -1, head_dim])
         weight = tf.nn.softmax(tf.matmul(tf.transpose(q, [0,2,1]), k), axis=-1)  # [B*h, N, M]
-        a = tf.matmul(weight, tf.reshape(v, [B*self.n_heads, head_dim, -1]))  # [B*h, N, head_dim]
+        a = tf.matmul(weight, v)  # [B*h, N, head_dim]
         a = tf.reshape(a, [B, C, N])
         return a
 
