@@ -125,7 +125,7 @@ class QKVAttention(layers.Layer):
             ek, ev = tf.split(encoder_kv, 2, axis=1)
             k = tf.concat([ek, k], axis=2)
             v = tf.concat([ev, v], axis=2)
-        scale = 1 / math.sqrt(math.sqrt(float(head_dim)))
+        scale = 1.0 / tf.sqrt(tf.sqrt(tf.cast(head_dim, tf.float32)))
         q = tf.reshape(q * scale, [B*self.n_heads, head_dim, N])
         k = tf.reshape(k * scale, [B*self.n_heads, head_dim, -1])
         weight = tf.nn.softmax(tf.matmul(tf.transpose(q, [0,2,1]), k), axis=-1)  # [B*h, N, M]
