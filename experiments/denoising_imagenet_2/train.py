@@ -91,7 +91,7 @@ def default_init(scale):
 
 def normalization(channels):
     # equivalent to PyTorch nn.GroupNorm(32, channels)
-    return tfa.layers.GroupNormalization(groups=32, axis=-1)
+    return layers.LayerNormalization(groups=32, axis=-1)
 
 def linear(in_dim, out_dim):
     return layers.Dense(out_dim, kernel_initializer=default_init(1.0))
