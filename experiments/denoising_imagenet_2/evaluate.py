@@ -49,7 +49,7 @@ parser.add_argument('--c2', type=float, default=1.0, help='Second coefficient (f
 parser.add_argument('--num_test', type=int, default=1000, help='Second coefficient (float).')
 parser.add_argument('--type', type=str, default='default', choices=['default', 'addim'],
                     help='Evaluation type: default, or addim.')
-parser.add_argument('--path', type=str, default='checkpoints/checkpoints/imagenet-unet-deblurring-2/',
+parser.add_argument('--path', type=str, default='checkpoints/imagenet-unet-deblurring-2/',
                     help='ckpt path.')
 
 args = parser.parse_args()
