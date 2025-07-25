@@ -486,6 +486,9 @@ if __name__=='__main__':
         except (ValueError, RuntimeError):
             # Invalid device or cannot modify virtual devices once initialized.
             pass
+
+    strategy = tf.distribute.MirroredStrategy()
+    print(f"Number of GPUs: {strategy.num_replicas_in_sync}")
     
     ##### Fix to bayesflow helper_functions.py file #####
     spec = importlib.util.find_spec("bayesflow")
@@ -566,7 +569,8 @@ if __name__=='__main__':
     forward_val = {'prior_draws': val_imgs,
                          'sim_data': val_imgs}
 
-    trainer, optimizer, num_epochs, batch_size = build_trainer(args, forward_train=forward_train)
+    with strategy.scope():
+        trainer, optimizer, num_epochs, batch_size = build_trainer(args, forward_train=forward_train)
 
     print(f"Training for {num_epochs} epochs...")
 
