@@ -46,7 +46,7 @@ def inpainting_mask(image, mask_size=32):
     return masked
 
 
-def grayscale_camera_rgb(theta, noise='poisson', psf_width=2.5, noise_scale=1.0, noise_gain=0.5):
+def grayscale_camera_rgb(theta, noise='poisson', psf_width=17.5, noise_scale=1.0, noise_gain=0.5):
     # Apply noise+blur channel-wise
     noisy = noise_gain * random_noise(noise_scale * theta, mode=noise)
     blurred = np.stack([gaussian_filter(noisy[..., c], sigma=psf_width) for c in range(3)], axis=-1)
