@@ -49,13 +49,13 @@ parser.add_argument('--c2', type=float, default=1.0, help='Second coefficient (f
 parser.add_argument('--num_test', type=int, default=1000, help='Second coefficient (float).')
 parser.add_argument('--type', type=str, default='default', choices=['default', 'addim'],
                     help='Evaluation type: default, or addim.')
-parser.add_argument('--path', type=str, default='checkpoints/cifar10-deblurring-cmpe-unet-45000-25-07-14-113153/',
+parser.add_argument('--path', type=str, default='checkpoints/checkpoints/imagenet-unet-deblurring-2/',
                     help='ckpt path.')
 
 args = parser.parse_args()
 
 num_test = args.num_test
-img_size=32
+img_size=224
 
 # 2) Load ImageNette-160 instead of Fashion MNIST
 # ------------------------------------------------
@@ -73,23 +73,23 @@ img_size=32
 #         .prefetch(tf.data.AUTOTUNE)
 #     )
 
-def load_cifar(img_size, split):
+def load_imagenet(img_size, split):
     """Loads ImageNet using TensorFlow Datasets."""
     import tensorflow_datasets as tfds
     def _preprocess(image, label):
-        #image = tf.image.resize(image, [img_size, img_size])
+        image = tf.image.resize(image, [img_size, img_size])
         image = tf.cast(image, tf.float32) / 255.0  # [0,1]
         image = image * 2.0 - 1.0  # [-1,1]
         return image, label
 
-    ds = tfds.load('cifar10', split=split, as_supervised=True, data_dir = "/work/pi_aghasemi_umass_edu/afzali_umass/W2S/.cache")
+    ds = tfds.load('imagenette', split=split, as_supervised=True, data_dir = "/work/pi_aghasemi_umass_edu/afzali_umass/W2S/.cache")
     ds = ds.map(_preprocess, num_parallel_calls=tf.data.AUTOTUNE)
-    ds = ds.shuffle(1024).prefetch(tf.data.AUTOTUNE)
+    #ds = ds.shuffle(1024).prefetch(tf.data.AUTOTUNE)
     return ds
 
 
 #train_ds = load_imagenette160("train[:5%]", img_size=160, batch_size=args.batch_size)  # <<< EDITED
-test_ds = load_cifar(img_size, 'test')  # <<< EDITED
+test_ds = load_imagenet(img_size, 'validation')  # <<< EDITED
 
 # <<< ADDED: unbatch then take only num_test examples
 test_ds_unbatched = test_ds.take(num_test)
@@ -144,7 +144,7 @@ def to_id(method, architecture, num_train):
     return f"{method}-{architecture}-{num_train}"
 
 checkpoint_path_dict = {
-    to_id("cmpe", "unet", 45000): args.path,
+    to_id("cmpe", "unet", 12000): args.path,
     #to_id("cmpe", "unet", 60000): "checkpoints/cmpe-unet-60000-25-04-10-150038/",
 }
 
@@ -210,7 +210,7 @@ def random_indices_per_class(labels, seed=42):
 
 
 def create_mean_std_plots(
-    trainer, seed=42, filepath=None, n_samples=500, cmpe_steps=30, fmpe_step_size=1 / 248, method="" , image_size=32
+    trainer, seed=42, filepath=None, n_samples=500, cmpe_steps=30, fmpe_step_size=1 / 248, method="" , image_size=224
 ):
     """Helper function for displaying Figure 7 in main paper.
     Default seed is the one and only 42!
@@ -275,7 +275,7 @@ def create_mean_std_plots(
 
 """## Per-Class Generation: Samples"""
 
-def create_sample_plots(trainer, seed=42, filepath=None, cmpe_steps=30, fmpe_step_size=1 / 248, method="" , image_size=32):
+def create_sample_plots(trainer, seed=42, filepath=None, cmpe_steps=30, fmpe_step_size=1 / 248, method="" , image_size=224):
     """Helper function for displaying Figure 7 in main paper.
     Default seed is the one and only 42!
     """
