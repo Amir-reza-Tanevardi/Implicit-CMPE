@@ -295,9 +295,9 @@ def create_sample_plots(trainer, seed=42, filepath=None, cmpe_steps=30, fmpe_ste
 
         # Obtain samples and clip to prior range, instead of rejecting
         if args.type == "addim":
-            samples = trainer.amortizer.sample_addim(inp, n_steps=cmpe_steps, n_samples=n_samples, c1=args.c1, c2=args.c2)
+            samples = trainer.amortizer.sample_addim(inp, n_steps=cmpe_steps, n_samples=n_samples, c1=args.c1, c2=args.c2, img_size = image_size)
         else:
-            samples = trainer.amortizer.sample(inp, n_steps=cmpe_steps, n_samples=n_samples)
+            samples = trainer.amortizer.sample(inp, n_steps=cmpe_steps, n_samples=n_samples, img_size = image_size)
         samples = np.clip(samples, a_min=-1.01, a_max=1.01)
 
         # Plot truth and blurred
@@ -395,12 +395,12 @@ for key, trainer in trainer_dict.items():
     if args.type == "addim":
         c = conf["summary_conditions"][0, None]
         with torch.no_grad():
-            trainer.amortizer.sample_addim({"summary_conditions": c}, n_steps=cmpe_steps, n_samples=n_samples, c1=args.c1 , c2=args.c2)
+            trainer.amortizer.sample_addim({"summary_conditions": c}, n_steps=cmpe_steps, n_samples=n_samples, c1=args.c1 , c2=args.c2, img_size = img_size)
 
     else:
         c = conf["summary_conditions"][0, None]
         with torch.no_grad():
-            trainer.amortizer.sample({"summary_conditions": c}, n_steps=cmpe_steps, n_samples=n_samples)
+            trainer.amortizer.sample({"summary_conditions": c}, n_steps=cmpe_steps, n_samples=n_samples, img_size = img_size)
 
     for theta in np.linspace(50, 250, 21):
         all_psnr, all_ssim, all_lpips, all_mses = [], [], [], []
@@ -424,7 +424,8 @@ for key, trainer in trainer_dict.items():
                             n_steps=cmpe_steps,
                             n_samples=n_samples,
                             c1=args.c1,
-                            c2=args.c2
+                            c2=args.c2,
+                            img_size = img_size
                         )
                         batch_samples.append(sample[0])
                     batch_samples = np.stack(batch_samples)  # shape: (b_size, D)
@@ -434,7 +435,8 @@ for key, trainer in trainer_dict.items():
                         sample = trainer.amortizer.sample(
                             {"summary_conditions": batch_conditions[i, None]},
                             n_steps=cmpe_steps,
-                            n_samples=n_samples
+                            n_samples=n_samples,
+                            img_size = img_size
                         )
                         batch_samples.append(sample[0])
                     batch_samples = np.stack(batch_samples)  # shape: (b_size, D)
