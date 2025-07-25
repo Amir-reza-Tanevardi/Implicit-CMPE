@@ -156,7 +156,7 @@ for key, checkpoint_path in checkpoint_path_dict.items():
 
 trainer_dict = {}
 for key, checkpoint_path in checkpoint_path_dict.items():
-    trainer_dict[key] = build_trainer(checkpoint_path, arg_dict[key])
+    trainer_dict[key] = build_trainer(checkpoint_path,  Namespace(**arg_dict[key]) )
 
 for key, trainer in trainer_dict.items():
     fig_dir = f"figures/{key}"
@@ -337,7 +337,7 @@ for key, trainer in trainer_dict.items():
         trainer,
         seed=42,
         filepath=os.path.join(fig_dir, "samples_main.pdf"),
-        method=arg_dict[key].method,
+        method= Namespace(**arg_dict[key]).method,
         cmpe_steps=cmpe_steps,
         fmpe_step_size=fmpe_step_size,
         image_size = img_size
