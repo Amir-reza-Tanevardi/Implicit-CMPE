@@ -28,7 +28,7 @@ import seaborn as sns
 import tensorflow as tf
 from bayesflow.computational_utilities import maximum_mean_discrepancy
 from tqdm.autonotebook import tqdm
-from train_cifar_denoising import build_trainer, configurator_blurred
+from train import build_trainer, configurator_blurred
 
 physical_devices = tf.config.list_physical_devices("GPU")
 if physical_devices:
