@@ -705,7 +705,8 @@ class ConsistencyAmortizer(AmortizedPosterior):
            eta: float = 0.0,           # ← new hyperparameter
            to_numpy: bool = True,
            c1: float = 1.0,
-           c2: float = 1.0,          
+           c2: float = 1.0,  
+           img_size: int = 32,          
            **kwargs):
         """
         DDIM / consistency‐model sampler following eq. (9) in your notes:
@@ -717,6 +718,8 @@ class ConsistencyAmortizer(AmortizedPosterior):
 
         where σ_{n-1} = η · sqrt((t_n^2 − t_{n-1}^2)·t_{n-1}^2 / t_n^2).
         """
+
+        self.img_size = img_size       
 
         # 1) compute conditioning
         _, conditions = self._compute_summary_condition(
@@ -922,7 +925,7 @@ class ConsistencyAmortizer(AmortizedPosterior):
         return post.numpy() if to_numpy else post
 
       
-    def sample(self, input_dict, n_samples, n_steps=10, to_numpy=True, step_size=1e-3, **kwargs):
+    def sample(self, input_dict, n_samples, n_steps=10, to_numpy=True, step_size=1e-3, img_size= 32, **kwargs):
         """Generates random draws from the approximate posterior given a dictionary with conditonal variables
         using the multistep sampling algorithm (Algorithm 1).
 
@@ -947,6 +950,8 @@ class ConsistencyAmortizer(AmortizedPosterior):
         post_samples : tf.Tensor or np.ndarray of shape (n_data_sets, n_samples, n_params)
             The sampled parameters from the approximate posterior of each data set
         """
+
+        self.img_size = img_size
 
         # Compute condition (direct, summary, or both)
         _, conditions = self._compute_summary_condition(
