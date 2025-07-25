@@ -572,15 +572,15 @@ if __name__=='__main__':
     with strategy.scope():
         trainer, optimizer, num_epochs, batch_size = build_trainer(args, forward_train=forward_train)
 
-    print(f"Training for {num_epochs} epochs...")
-
-    process = psutil.Process(os.getpid())
-    print("CPU RAM usage (GB):", process.memory_info().rss / 1e9)
+        print(f"Training for {num_epochs} epochs...")
     
-    trainer.train_offline(
-        forward_train,
-        optimizer=optimizer,
-        epochs=num_epochs,
-        batch_size=batch_size,
-        validation_sims=forward_val
-    )
+        process = psutil.Process(os.getpid())
+        print("CPU RAM usage (GB):", process.memory_info().rss / 1e9)
+        
+        trainer.train_offline(
+            forward_train,
+            optimizer=optimizer,
+            epochs=num_epochs,
+            batch_size=batch_size,
+            validation_sims=forward_val
+        )
