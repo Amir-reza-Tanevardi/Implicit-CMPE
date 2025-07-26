@@ -70,6 +70,9 @@ class CustomTrainer(Trainer):
           
         self._setup_optimizer(optimizer, epochs, 5)
         self.loss_history.start_new_run()
+
+        # Create early stopper, if conditions met, otherwise None returned
+        early_stopper = self._config_early_stopping(early_stopping, validation_sims, **kwargs)
     
         for ep in range(1, epochs + 1):
           with tqdm(
