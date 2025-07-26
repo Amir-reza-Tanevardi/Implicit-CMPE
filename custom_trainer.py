@@ -5,6 +5,7 @@ from pickle import load as pickle_load
 import numpy as np
 import tensorflow as tf
 from tqdm.autonotebook import tqdm
+from bayesflow.trainers import Trainer
 
 from bayesflow.amortizers import (
     AmortizedLikelihood,
@@ -29,6 +30,8 @@ from bayesflow.helper_functions import backprop_step, extract_current_lr, format
 from bayesflow.simulation import GenerativeModel, MultiGenerativeModel
 
 logging.basicConfig()
+
+
 class CustomTrainer(Trainer):
     def train_offline(
         self,
