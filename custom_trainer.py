@@ -49,12 +49,12 @@ class CustomTrainer(Trainer):
         else:
                _backprop_step = backprop_step
           
-        self._setup_optimizer(optimizer, epochs, validation_dict)
+        self._setup_optimizer(optimizer, epochs, 5)
         self.loss_history.start_new_run()
     
         for ep in range(1, epochs + 1):
           with tqdm(
-                    total=data_set.num_batches, desc="Training epoch {}".format(ep), mininterval=TQDM_MININTERVAL
+                    total=tf.data.experimental.cardinality(data_set).numpy(), desc="Training epoch {}".format(ep), mininterval=TQDM_MININTERVAL
           ) as p_bar:
             for bi, forward_dict in enumerate(data_set, start=1):
                 if not use_tf_dataset:
