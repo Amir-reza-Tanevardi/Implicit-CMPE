@@ -113,7 +113,7 @@ class CustomTrainer(Trainer):
             else:
                 val_loss = tf.reduce_mean(tf.stack(val_losses))
 
-    if val_loss is not None:
-        self.loss_history.add_val_entry(ep, val_loss)
-        val_loss_str = loss_to_string(ep, val_loss)
-        logging.getLogger().info(val_loss_str)
+        if val_loss is not None:
+            self.loss_history.add_val_entry(ep, val_loss)
+            val_loss_str = loss_to_string(ep, val_loss)
+            logging.getLogger().info(val_loss_str)
