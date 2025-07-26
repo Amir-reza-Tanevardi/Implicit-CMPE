@@ -11,9 +11,13 @@ class CustomTrainer(Trainer):
         epochs=1,
         optimizer=None,
         batch_size=64,
+        save_checkpoint=True,
+        reuse_optimizer=False,
+        early_stopping=False,
         validation_dataset=None,
         validation_sims=None,
         val_freq=5,
+        use_autograph=True,
         **kwargs
     ):
         if simulations_dict is not None and train_dataset is not None:
