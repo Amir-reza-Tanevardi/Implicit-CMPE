@@ -1,5 +1,6 @@
 from bayesflow.trainers import Trainer
 from bayesflow.helper_functions import loss_to_string, backprop_step
+from bayesflow.default_settings import TQDM_MININTERVAL
 import logging
 from tqdm import tqdm
 import tensorflow as tf
