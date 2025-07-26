@@ -57,7 +57,7 @@ class CustomTrainer(Trainer):
           with tqdm(
                     total=tf.data.experimental.cardinality(data_set).numpy(), desc="Training epoch {}".format(ep), mininterval=TQDM_MININTERVAL
           ) as p_bar:
-            for bi, forward_dict in enumerate(data_set, start=1):
+            for bi, forward_dict in enumerate(data_set.as_numpy_iterator(), start=1):
                 if not use_tf_dataset:
                     input_dict = self.configurator(forward_dict, **kwargs.pop("conf_args", {}))
                 else:
