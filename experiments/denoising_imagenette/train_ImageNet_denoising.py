@@ -19,6 +19,7 @@ from tensorflow.keras import layers
 
 sys.path.append("../../")
 from amortizers import ConsistencyAmortizer
+from custom_trainer import CustomTrainer
 
 # --- Data Preprocessing ---
 
@@ -315,7 +316,7 @@ def build_trainer(args, forward_train=None):
         s1=args.s1
     )
 
-    trainer = Trainer(amortizer, configurator=configurator_blurred,
+    trainer = CustomTrainer(amortizer, configurator=configurator_blurred,
                       checkpoint_path=args.checkpoint_path)
 
     if forward_train is not None:
@@ -375,6 +376,7 @@ if __name__=='__main__':
     parser.add_argument('--num-steps', type=int, default=100000)
     parser.add_argument("--num-training", type=int, default=12000)
     parser.add_argument("--num-val", type=int, default=1000)
+    parser.add_argument("--val-freq", type=int, default=5)
     parser.add_argument("--lr-adapt", type=str, default="none", choices=["none", "cosine"])
     parser.add_argument('--tmax', type=float, default=1000.0)
     parser.add_argument('--epsilon', type=float, default=1e-3)
@@ -399,32 +401,42 @@ if __name__=='__main__':
     process = psutil.Process(os.getpid())
     print("CPU RAM usage (GB):", process.memory_info().rss / 1e9)
     
-    train_ds = load_imagenet(args.img_size, 'train')
-    val_ds   = load_imagenet(args.img_size, 'validation')
+    # train_ds = load_imagenet(args.img_size, 'train')
+    # val_ds   = load_imagenet(args.img_size, 'validation')
     
-    train_ds_unbatched = train_ds.shuffle(2048).take(args.num_training)
-    val_ds_unbatched = val_ds.take(args.num_val)
+    # train_ds_unbatched = train_ds.shuffle(2048).take(args.num_training)
+    # val_ds_unbatched = val_ds.take(args.num_val)
     
-    train_imgs = []
-    train_lbls = []
-    for img, lbl in train_ds_unbatched:
-        train_imgs.append(img.numpy())
-        train_lbls.append(lbl.numpy())
-    train_imgs = np.stack(train_imgs, axis=0)
-    train_lbls = np.stack(train_lbls, axis=0)
+    # train_imgs = []
+    # train_lbls = []
+    # for img, lbl in train_ds_unbatched:
+    #     train_imgs.append(img.numpy())
+    #     train_lbls.append(lbl.numpy())
+    # train_imgs = np.stack(train_imgs, axis=0)
+    # train_lbls = np.stack(train_lbls, axis=0)
 
-    val_imgs = []
-    val_lbls = []
-    for img, lbl in val_ds_unbatched:
-        val_imgs.append(img.numpy())
-        val_lbls.append(lbl.numpy())
-    val_imgs = np.stack(val_imgs, axis=0)
-    val_lbls = np.stack(val_lbls, axis=0)
+    # val_imgs = []
+    # val_lbls = []
+    # for img, lbl in val_ds_unbatched:
+    #     val_imgs.append(img.numpy())
+    #     val_lbls.append(lbl.numpy())
+    # val_imgs = np.stack(val_imgs, axis=0)
+    # val_lbls = np.stack(val_lbls, axis=0)
 
-    forward_train = {'prior_draws': train_imgs,
-         'sim_data': train_imgs}
-    forward_val = {'prior_draws': val_imgs,
-                         'sim_data': val_imgs}
+    # forward_train = {'prior_draws': train_imgs,
+    #      'sim_data': train_imgs}
+    # forward_val = {'prior_draws': val_imgs,
+    #                      'sim_data': val_imgs}
+
+    train_ds = load_imagenet(args.img_size, 'train') \
+    .shuffle(2048) \
+    .batch(batch_size) \
+    .map(lambda x, y: {'prior_draws': x, 'sim_data': y}) \
+    .prefetch(tf.data.AUTOTUNE)
+
+    val_ds = load_imagenet(val_dir, split="validation") \
+    .batch(batch_size) \
+    .map(lambda x, y: {'prior_draws': x, 'sim_data': y})
 
     trainer, optimizer, num_epochs, batch_size = build_trainer(args, forward_train=forward_train)
 
@@ -434,9 +446,12 @@ if __name__=='__main__':
     print("CPU RAM usage (GB):", process.memory_info().rss / 1e9)
     
     trainer.train_offline(
-        forward_train,
-        optimizer=optimizer,
+        simulations_dict=None,
+        train_dataset=train_ds,
         epochs=num_epochs,
+        optimizer=optimizer,
         batch_size=batch_size,
-        validation_sims=forward_val
+        validation_dataset=val_ds,
+        validation_sims=None,
+        val_freq=args.val_freq
     )
