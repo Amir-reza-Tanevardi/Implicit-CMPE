@@ -291,7 +291,7 @@ def build_trainer(args, forward_train=None):
     num_steps = args.num_steps
     initial_learning_rate = args.initial_learning_rate
     if forward_train is not None:
-        num_batches = np.ceil(forward_train["prior_draws"].shape[0] / batch_size)
+        num_batches = np.ceil(arg.num_training / batch_size)
         num_epochs = int(np.ceil(num_steps / num_batches))
         num_steps = num_epochs * num_batches
     else:
@@ -430,7 +430,7 @@ if __name__=='__main__':
 
     train_ds = load_imagenet(args.img_size, 'train') \
     .shuffle(2048) \
-    .batch(batch_size) \
+    .batch(arbatch_size) \
     .map(lambda x, y: {'prior_draws': x, 'sim_data': y}) \
     .prefetch(tf.data.AUTOTUNE)
 
@@ -438,7 +438,7 @@ if __name__=='__main__':
     .batch(batch_size) \
     .map(lambda x, y: {'prior_draws': x, 'sim_data': y})
 
-    trainer, optimizer, num_epochs, batch_size = build_trainer(args, forward_train=forward_train)
+    trainer, optimizer, num_epochs, batch_size = build_trainer(args, forward_train={'prior_draws': [], 'sim_data': []})
 
     print(f"Training for {num_epochs} epochs...")
 
