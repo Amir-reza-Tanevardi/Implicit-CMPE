@@ -1,7 +1,17 @@
 from bayesflow.trainers import Trainer
-from bayesflow.helper_functions import loss_to_string
+from bayesflow.helper_functions import loss_to_string, backprop_step
 import logging
 from tqdm import tqdm
+import tensorflow as tf
+
+from bayesflow.helper_classes import (
+    EarlyStopper,
+    LossHistory,
+    MemoryReplayBuffer,
+    MultiSimulationDataset,
+    SimulationDataset,
+    SimulationMemory,
+)
 
 class CustomTrainer(Trainer):
     def train_offline(
