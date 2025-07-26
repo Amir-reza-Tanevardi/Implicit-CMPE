@@ -430,12 +430,12 @@ if __name__=='__main__':
 
     train_ds = load_imagenet(args.img_size, 'train') \
     .shuffle(2048) \
-    .batch(arbatch_size) \
+    .batch(args.batch_size) \
     .map(lambda x, y: {'prior_draws': x, 'sim_data': y}) \
     .prefetch(tf.data.AUTOTUNE)
 
     val_ds = load_imagenet(val_dir, split="validation") \
-    .batch(batch_size) \
+    .batch(args.batch_size) \
     .map(lambda x, y: {'prior_draws': x, 'sim_data': y})
 
     trainer, optimizer, num_epochs, batch_size = build_trainer(args, forward_train={'prior_draws': [], 'sim_data': []})
