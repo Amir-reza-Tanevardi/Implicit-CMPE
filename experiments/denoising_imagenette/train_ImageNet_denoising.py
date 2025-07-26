@@ -7,6 +7,9 @@ import sys
 
 import numpy as np
 import tensorflow as tf
+from tensorflow.keras.mixed_precision import set_global_policy
+set_global_policy('mixed_float16')
+
 from bayesflow.experimental.rectifiers import RectifiedDistribution
 from bayesflow.trainers import Trainer
 from scipy.ndimage import gaussian_filter
@@ -45,7 +48,7 @@ def inpainting_mask(image, mask_size=32):
     return masked
 
 
-def grayscale_camera_rgb(theta, noise='poisson', psf_width=2.5, noise_scale=1.0, noise_gain=0.5):
+def grayscale_camera_rgb(theta, noise='poisson', psf_width=13.5, noise_scale=1.0, noise_gain=0.5):
     # Apply noise+blur channel-wise
     noisy = noise_gain * random_noise(noise_scale * theta, mode=noise)
     blurred = np.stack([gaussian_filter(noisy[..., c], sigma=psf_width) for c in range(3)], axis=-1)
@@ -64,7 +67,7 @@ def configurator_blurred(f):
     """
     B, H, W, C = f['prior_draws'].shape
     # Flatten parameters (already normalized)
-    p = f['prior_draws'].reshape(B, -1).astype(np.float32)
+    p = f['prior_draws'].astype(np.float32)
     # Create blurred summary conditions
     blurred = np.stack([grayscale_camera_rgb(f['sim_data'][b]) for b in range(B)], axis=0).astype(np.float32)
     return {'parameters': p, 'summary_conditions': blurred}
@@ -200,7 +203,7 @@ def TimeMLP(units, activation_fn=keras.activations.swish):
 def build_unet_model(img_size, channels, widths, has_attention, tmax,
                      cond_dim=128, num_res_blocks=2, norm_groups=8,
                      first_channels=64):
-    image_input = layers.Input(shape=(img_size*img_size*channels,), name='image_input')
+    image_input = layers.Input(shape=(img_size,img_size,channels), name='image_input')
     x = layers.Reshape((img_size, img_size, channels))(image_input)
     time_input = layers.Input(shape=(), name='time_input', dtype=tf.float32)
     cond_input = layers.Input(shape=(cond_dim,), name='condition_input')
@@ -244,6 +247,7 @@ def build_unet_model(img_size, channels, widths, has_attention, tmax,
     x = layers.GroupNormalization(norm_groups)(x)
     x = layers.Activation('swish')(x)
     x = layers.Conv2D(channels, 3, padding='same', kernel_initializer=kernel_init(0.0))(x)
+    x = tf.keras.activations.tanh(x)
     out = x
 
     model = keras.Model([image_input, cond_input, time_input], out, name='imagenet_unet')
@@ -294,14 +298,15 @@ def build_trainer(args, forward_train=None):
         num_steps = 0
     
     
-    if args.fine_tune_summary:
-        summary_net.trainable = False
+    # if args.fine_tune_summary:
+    #     summary_net.trainable = False
 
 
 
     amortizer = ConsistencyAmortizer(
         consistency_net=unet,
         summary_net=summary_net,
+        summary_loss_fun="MMD",
         num_steps=args.num_steps,
         sigma2=args.sigma2,
         eps=args.epsilon,
@@ -369,6 +374,7 @@ if __name__=='__main__':
     parser.add_argument('--initial-learning-rate', type=float, default=5e-4)
     parser.add_argument('--num-steps', type=int, default=100000)
     parser.add_argument("--num-training", type=int, default=12000)
+    parser.add_argument("--num-val", type=int, default=1000)
     parser.add_argument("--lr-adapt", type=str, default="none", choices=["none", "cosine"])
     parser.add_argument('--tmax', type=float, default=1000.0)
     parser.add_argument('--epsilon', type=float, default=1e-3)
@@ -377,7 +383,7 @@ if __name__=='__main__':
     parser.add_argument('--sigma2', type=float, default=0.25)
     parser.add_argument('--res-blocks', type=int, default=2)
     parser.add_argument('--norm-groups', type=int, default=8)
-    parser.add_argument('--base-channels', type=int, default=64)
+    parser.add_argument('--base-channels', type=int, default=128)
     parser.add_argument("--optimizer", type=str, default="adamw")
     parser.add_argument('--fine-tune-summary', action='store_true')
     parser.add_argument('--checkpoint-path', type=str, default='checkpoints/imagenet-unet-deblurring')
@@ -396,8 +402,8 @@ if __name__=='__main__':
     train_ds = load_imagenet(args.img_size, 'train')
     val_ds   = load_imagenet(args.img_size, 'validation')
     
-    train_ds_unbatched = train_ds.take(args.num_training)
-    val_ds_unbatched = val_ds.take(10)
+    train_ds_unbatched = train_ds.shuffle(2048).take(args.num_training)
+    val_ds_unbatched = val_ds.take(args.num_val)
     
     train_imgs = []
     train_lbls = []
