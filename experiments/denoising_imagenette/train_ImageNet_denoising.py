@@ -7,8 +7,6 @@ import sys
 
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras.mixed_precision import set_global_policy
-set_global_policy('mixed_float16')
 
 from bayesflow.experimental.rectifiers import RectifiedDistribution
 from bayesflow.trainers import Trainer
@@ -266,6 +264,7 @@ def build_trainer(args, forward_train=None):
 
     # Build summary network
     summary_net = keras.Sequential([
+        keras.Input(shape=(img_size,img_size,channels)),
         layers.Conv2D(64,3,activation='relu',padding='same', input_shape=(img_size,img_size,channels)),
         layers.GroupNormalization(args.norm_groups),
         layers.Conv2D(64,3,activation='relu',padding='same'),
@@ -291,7 +290,7 @@ def build_trainer(args, forward_train=None):
     num_steps = args.num_steps
     initial_learning_rate = args.initial_learning_rate
     if forward_train is not None:
-        num_batches = np.ceil(arg.num_training / batch_size)
+        num_batches = np.ceil(args.num_training / batch_size)
         num_epochs = int(np.ceil(num_steps / num_batches))
         num_steps = num_epochs * num_batches
     else:
