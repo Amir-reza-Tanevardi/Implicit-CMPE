@@ -434,7 +434,7 @@ if __name__=='__main__':
     .map(lambda x, y: {'prior_draws': x, 'sim_data': y}) \
     .prefetch(tf.data.AUTOTUNE)
 
-    val_ds = load_imagenet(val_dir, split="validation") \
+    val_ds = load_imagenet(args.img_size, split="validation") \
     .batch(args.batch_size) \
     .map(lambda x, y: {'prior_draws': x, 'sim_data': y})
 
