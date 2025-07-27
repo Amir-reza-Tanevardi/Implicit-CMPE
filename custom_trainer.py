@@ -135,7 +135,7 @@ class CustomTrainer(Trainer):
     
         elif validation_dataset is not None:
             val_losses = []
-            for val_batch in validation_dataset:
+            for val_batch in validation_dataset.as_numpy_iterator():
                 input_dict = self.configurator(val_batch)
                 batch_loss = self.amortizer.compute_loss(input_dict)
                 val_losses.append(batch_loss)
