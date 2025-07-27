@@ -369,7 +369,7 @@ if __name__=='__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--img-size', type=int, default=256)
-    parser.add_argument('--batch-size', type=int, default=16)
+    parser.add_argument('--batch-size', type=int, default=4)
     parser.add_argument('--initial-learning-rate', type=float, default=5e-4)
     parser.add_argument('--num-steps', type=int, default=100000)
     parser.add_argument("--num-training", type=int, default=9500)
