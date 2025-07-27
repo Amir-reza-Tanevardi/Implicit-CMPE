@@ -103,7 +103,7 @@ class CustomTrainer(Trainer):
     
           # Store and compute validation loss, if specified
           self._save_trainer(save_checkpoint)
-          if validation_sims is not None or validation_dataset is not None and ep / val_freq == 0:
+          if validation_sims is not None or validation_dataset is not None and ep % val_freq == 0:
               self._validation(
                   ep,
                   validation_sims=validation_sims,
