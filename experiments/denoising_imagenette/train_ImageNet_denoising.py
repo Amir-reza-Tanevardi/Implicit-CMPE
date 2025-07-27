@@ -372,8 +372,8 @@ if __name__=='__main__':
     parser.add_argument('--batch-size', type=int, default=16)
     parser.add_argument('--initial-learning-rate', type=float, default=5e-4)
     parser.add_argument('--num-steps', type=int, default=100000)
-    parser.add_argument("--num-training", type=int, default=12000)
-    parser.add_argument("--num-val", type=int, default=1000)
+    parser.add_argument("--num-training", type=int, default=9500)
+    parser.add_argument("--num-val", type=int, default=2500)
     parser.add_argument("--val-freq", type=int, default=5)
     parser.add_argument("--lr-adapt", type=str, default="none", choices=["none", "cosine"])
     parser.add_argument('--tmax', type=float, default=1000.0)
@@ -433,8 +433,10 @@ if __name__=='__main__':
     .prefetch(tf.data.AUTOTUNE)
 
     val_ds = load_imagenet(args.img_size, split="validation") \
+    .take(args.num_val) \ 
     .batch(args.batch_size) \
     .map(lambda x, y: {'prior_draws': x, 'sim_data': y})
+    .prefetch(tf.data.AUTOTUNE)
 
     trainer, optimizer, num_epochs, batch_size = build_trainer(args, forward_train={'prior_draws': [], 'sim_data': []})
 
