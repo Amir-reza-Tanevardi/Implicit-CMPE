@@ -14,6 +14,7 @@ sys.path.append("../../")
 
 import pickle
 import timeit
+import argparse
 
 import tensorflow_datasets as tfds
 from argparse import Namespace
@@ -38,12 +39,25 @@ if physical_devices:
 
 """# Set up Forward Inference"""
 
-num_test = 500
-img_size = 224
+parser = argparse.ArgumentParser(description="Evaluation script with arguments.")
+
+parser.add_argument('--c1', type=float, default=1.0, help='First coefficient (float).')
+parser.add_argument('--c2', type=float, default=1.0, help='Second coefficient (float).')
+parser.add_argument('--num_test', type=int, default=2000, help='Number of test images')
+parser.add_argument('--batch_size', type=int, default=8, help='Batch size for calculating test metrics')
+parser.add_argument('--type', type=str, default='default', choices=['default', 'addim'],
+                    help='Evaluation type: default, or addim.')
+parser.add_argument('--path', type=str, default='checkpoints/imagenet-unet-deblurring-3 /',
+                    help='ckpt path.')
+
+args = parser.parse_args()
+
+num_test = args.num_test
+img_size = 256
 
 # 2) Load ImageNette-160 instead of Fashion MNIST
 # ------------------------------------------------
-def load_imagenette(split, img_size=160):
+def load_imagenette(split, img_size=256):
     ds = tfds.load("imagenette", split=split, as_supervised=True, data_dir = "/work/pi_aghasemi_umass_edu/afzali_umass/W2S/.cache")
     def _prep(image, label):
         image = tf.image.resize(image, [img_size, img_size])
@@ -114,7 +128,7 @@ def to_id(method, architecture, num_train):
     return f"{method}-{architecture}-{num_train}"
 
 checkpoint_path_dict = {
-    to_id("cmpe", "unet", 12000): "checkpoints/imagenet-unet-deblurring/",
+    to_id("cmpe", "unet", 12000): args.path,
     #to_id("cmpe", "unet", 60000): "checkpoints/cmpe-unet-60000-25-04-10-150038/",
 }
 
@@ -244,7 +258,7 @@ def create_mean_std_plots(
 
 """## Per-Class Generation: Samples"""
 
-def create_sample_plots(trainer, seed=42, filepath=None, cmpe_steps=30, fmpe_step_size=1 / 248, method=""):
+def create_sample_plots(trainer, seed=42, filepath=None, cmpe_steps=30, fmpe_step_size=1 / 248, method="", image_size=256):
     """Helper function for displaying Figure 7 in main paper.
     Default seed is the one and only 42!
     """
@@ -261,11 +275,11 @@ def create_sample_plots(trainer, seed=42, filepath=None, cmpe_steps=30, fmpe_ste
         }
 
         # Obtain samples and clip to prior range, instead of rejecting
-        if method == "cmpe":
-            samples = trainer.amortizer.sample(inp, n_steps=cmpe_steps, n_samples=n_samples)
+        if args.type == "addim":
+            samples = trainer.amortizer.sample_addim(inp, n_steps=cmpe_steps, n_samples=n_samples, c1=args.c1, c2=args.c2)
         else:
-            samples = trainer.amortizer.sample(inp, n_samples=n_samples, step_size=fmpe_step_size)
-        samples = np.clip(samples, a_min=-1.01, a_max=1.01)
+            samples = trainer.amortizer.sample(inp, n_steps=cmpe_steps, n_samples=n_samples)
+        samples = np.clip(samples, a_min=-1.00, a_max=1.00)
 
         # Plot truth and blurred
         axarr[i,0].imshow((inp["parameters"].reshape(img_size,img_size,3)+1)/2)
@@ -307,6 +321,7 @@ for key, trainer in trainer_dict.items():
         method=arg_dict[key].method,
         cmpe_steps=cmpe_steps,
         fmpe_step_size=fmpe_step_size,
+        image_size = img_size
     )
     f.show()
 
@@ -332,9 +347,9 @@ np.random.seed(SEED)
 torch.manual_seed(SEED)
 
 # === CONFIG ===
-batch_size = 64
+batch_size = args.batch_size
 n_samples = 1
-n_datasets = 1000
+n_datasets = num_test
 
 # === DEVICE SETUP ===
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -358,10 +373,16 @@ for key, trainer in trainer_dict.items():
     kid_metric = KernelInceptionDistance(subset_size=50).to(device)
 
     # Pre-initialize model
-    if arg_dict[key].method == "cmpe":
+    if args.type == "addim":
+        c = conf["summary_conditions"][0, None]
+        with torch.no_grad():
+            trainer.amortizer.sample_addim({"summary_conditions": c}, n_steps=cmpe_steps, n_samples=n_samples, c1=args.c1 , c2=args.c2)
+
+    else:
         c = conf["summary_conditions"][0, None]
         with torch.no_grad():
             trainer.amortizer.sample({"summary_conditions": c}, n_steps=cmpe_steps, n_samples=n_samples)
+
 
     for theta in np.linspace(3, 3, 1):
         all_psnr, all_ssim, all_lpips, all_mses = [], [], [], []
@@ -377,7 +398,19 @@ for key, trainer in trainer_dict.items():
                 batch_conditions = conf["summary_conditions"][b_start:b_end]
 
                 # === SAMPLE FROM MODEL ===
-                if arg_dict[key].method == "cmpe":
+                if args.type == "addim":
+                    batch_samples = []
+                    for i in range(b_size):
+                        sample = trainer.amortizer.sample_addim(
+                            {"summary_conditions": batch_conditions[i, None]},
+                            n_steps=cmpe_steps,
+                            n_samples=n_samples,
+                            c1=args.c1,
+                            c2=args.c2
+                        )
+                        batch_samples.append(sample[0])
+                    batch_samples = np.stack(batch_samples)  # shape: (b_size, D)
+                else:
                     batch_samples = []
                     for i in range(b_size):
                         sample = trainer.amortizer.sample(
@@ -387,8 +420,6 @@ for key, trainer in trainer_dict.items():
                         )
                         batch_samples.append(sample[0])
                     batch_samples = np.stack(batch_samples)  # shape: (b_size, D)
-                else:
-                    raise NotImplementedError("Method not supported")
 
                 # === RENDER & CONVERT TO GPU TENSORS ===
                 true_imgs = np.stack([render_from_params(p) for p in batch_params])  # [B, 224, 224, 3]
