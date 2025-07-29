@@ -47,7 +47,7 @@ parser.add_argument('--num_test', type=int, default=2000, help='Number of test i
 parser.add_argument('--batch_size', type=int, default=8, help='Batch size for calculating test metrics')
 parser.add_argument('--type', type=str, default='default', choices=['default', 'addim'],
                     help='Evaluation type: default, or addim.')
-parser.add_argument('--path', type=str, default='checkpoints/imagenet-unet-deblurring-3 /',
+parser.add_argument('--path', type=str, default='checkpoints/imagenet-unet-deblurring-3/',
                     help='ckpt path.')
 
 args = parser.parse_args()
