@@ -132,7 +132,7 @@ def to_id(method, architecture, num_train):
 checkpoint_path_dict = {
     #to_id("cmpe", "unet", 2000): "checkpoints/cmpe-unet-2000-25-04-03-093413/",
     #to_id("cmpe", "unet", 2000): "checkpoints/cmpe-unet-2000-25-16-04-099999/",
-    to_id("cmpe", "unet", 60000): "checkpoints/",
+    to_id("cmpe", "unet", 60000): "checkpoint/",
 }
 
 arg_dict = {}
