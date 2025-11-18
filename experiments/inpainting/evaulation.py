@@ -33,6 +33,49 @@ if physical_devices:
         # Invalid device or cannot modify virtual devices once initialized.
         pass
 
+
+import argparse
+
+# ---------------------------
+# Argument Parser
+# ---------------------------
+parser = argparse.ArgumentParser(description="Evaluation script with sampler/steps/seed options.")
+
+parser.add_argument(
+    "--sampler",
+    type=str,
+    default="cm_multistep",
+    help="Sampler type to use for generation (e.g. 'cm_multistep', 'euler', 'heun')."
+)
+
+parser.add_argument(
+    "--cmpe_steps",
+    type=int,
+    default=2,
+    help="Number of sampling steps for CMPE."
+)
+
+parser.add_argument(
+    "--seed",
+    type=int,
+    default=42,
+    help="Random seed for sampling, torch, numpy, TF, etc."
+)
+
+args = parser.parse_args()
+
+# ---------------------------
+# APPLY THE ARGUMENTS
+# ---------------------------
+sampler = args.sampler
+cmpe_steps = args.cmpe_steps
+sample_seed = args.seed
+
+# For consistency, also set numpy / TF seeds here:
+np.random.seed(sample_seed)
+tf.random.set_seed(sample_seed)
+
+
 """# Set up Forward Inference"""
 
 fashion_mnist = tf.keras.datasets.fashion_mnist
@@ -40,7 +83,7 @@ fashion_mnist = tf.keras.datasets.fashion_mnist
 
 forward_train = {"prior_draws": train_images, "sim_data": train_images}
 
-num_val = 500
+num_val = 0
 perm = np.random.default_rng(seed=42).permutation(test_images.shape[0])
 
 forward_val = {
@@ -82,11 +125,6 @@ f.tight_layout()
 
 """## Set up Network, Amortizer and Trainer"""
 
-# sampling steps for CMPE - two-step sampling
-cmpe_steps = 2
-sampler="cm_multistep"
-stepss = cmpe_steps
-sample_seed=51
 # step size for FMPE, following Flow Matching for Scalable Simulation-Based Inference, https://arxiv.org/pdf/2305.17161.pdf
 fmpe_step_size = 1 / 248
 
@@ -96,7 +134,7 @@ def to_id(method, architecture, num_train):
 checkpoint_path_dict = {
     #to_id("cmpe", "unet", 2000): "checkpoints/cmpe-unet-2000-25-04-03-093413/",
     #to_id("cmpe", "unet", 2000): "checkpoints/cmpe-unet-2000-25-16-04-099999/",
-    to_id("cmpe", "unet", 60000): "/content/Implicit-CMPE/experiments/inpainting/checkpoints/cmpe-unet-60000-25-04-10-150038/",
+    to_id("cmpe", "unet", 60000): "checkpoints/",
 }
 
 arg_dict = {}
@@ -575,7 +613,7 @@ for key, trainer in trainer_dict.items():
                 for i in range(b_size):
                     sample = trainer.amortizer.sample(
                         {"summary_conditions": batch_conditions[i, None]},
-                        n_steps=stepss,
+                        n_steps=cmpe_steps,
                         n_samples=n_samples,
                         sampler=sampler
                     )
