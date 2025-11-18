@@ -33,6 +33,49 @@ if physical_devices:
         # Invalid device or cannot modify virtual devices once initialized.
         pass
 
+
+import argparse
+
+# ---------------------------
+# Argument Parser
+# ---------------------------
+parser = argparse.ArgumentParser(description="Evaluation script with sampler/steps/seed options.")
+
+parser.add_argument(
+    "--sampler",
+    type=str,
+    default="cm_multistep",
+    help="Sampler type to use for generation (e.g. 'cm_multistep', 'euler', 'heun')."
+)
+
+parser.add_argument(
+    "--cmpe_steps",
+    type=int,
+    default=2,
+    help="Number of sampling steps for CMPE."
+)
+
+parser.add_argument(
+    "--seed",
+    type=int,
+    default=42,
+    help="Random seed for sampling, torch, numpy, TF, etc."
+)
+
+args = parser.parse_args()
+
+# ---------------------------
+# APPLY THE ARGUMENTS
+# ---------------------------
+sampler = args.sampler
+cmpe_steps = args.cmpe_steps
+sample_seed = args.seed
+
+# For consistency, also set numpy / TF seeds here:
+np.random.seed(sample_seed)
+tf.random.set_seed(sample_seed)
+
+
 """# Set up Forward Inference"""
 
 fashion_mnist = tf.keras.datasets.fashion_mnist
@@ -40,7 +83,7 @@ fashion_mnist = tf.keras.datasets.fashion_mnist
 
 forward_train = {"prior_draws": train_images, "sim_data": train_images}
 
-num_val = 500
+num_val = 0
 perm = np.random.default_rng(seed=42).permutation(test_images.shape[0])
 
 forward_val = {
@@ -82,8 +125,6 @@ f.tight_layout()
 
 """## Set up Network, Amortizer and Trainer"""
 
-# sampling steps for CMPE - two-step sampling
-cmpe_steps = 2
 # step size for FMPE, following Flow Matching for Scalable Simulation-Based Inference, https://arxiv.org/pdf/2305.17161.pdf
 fmpe_step_size = 1 / 248
 
@@ -156,6 +197,71 @@ def random_indices_per_class(labels, seed=42):
                 break
     return out
 
+
+def save_single_sample_per_class(
+    trainer, conf, key, class_names, test_labels, 
+    seed=2, cmpe_steps=30, fmpe_step_size=1 / 248, method=""
+):
+    """
+    Generates a single posterior sample for a random test image from each class
+    and saves the raw 28x28 image array as a standalone PNG file.
+    No subplots, titles, or borders are included—just the pixel data.
+    """
+    
+    # 1. Select one index per class from the test set
+    idx_dict = random_indices_per_class(test_labels, seed=seed)
+    
+    # 2. Create output directory
+    fig_dir = f"figures/{key}/single_samples"
+    os.makedirs(fig_dir, exist_ok=True)
+
+    print(f"\nGenerating and saving a single 28x28 PNG sample for each class into: {fig_dir}...")
+
+    for c, idx in tqdm(idx_dict.items(), total=len(idx_dict)):
+        # Prepare input dict for network (batch size 1)
+        inp = {"summary_conditions": conf["summary_conditions"][idx : (idx + 1)]}
+
+        # 3. Generate a single sample (n_samples=1)
+        if method == "cmpe":
+            # samples shape will be (1, 1, 784)
+            samples = trainer.amortizer.sample(inp, sampler=sampler, n_steps=cmpe_steps, n_samples=1)
+        else:
+            # samples shape will be (1, 1, 784)
+            samples = trainer.amortizer.sample(inp, n_samples=1, step_size=fmpe_step_size)
+            
+        # Extract the single sample array (shape: 784)
+        sample = samples[0] 
+
+        # 4. Normalize and Reshape
+        # Standard image normalization from model's typical output range (e.g., [-1, 1]) to [0, 1]
+        # We ensure it's min-max normalized just in case the true range is slightly off [-1, 1]
+        normalized_sample = np.clip(sample, a_min=-1.01, a_max=1.01)
+        image_array = normalized_sample.reshape(28, 28)
+
+        # 5. Save the image directly using imsave
+        class_name = class_names[c]
+        class_name_for_file = class_name.replace("/", "_").replace(" ", "_").lower()
+        filepath = os.path.join(fig_dir, f"{class_name_for_file}_sample.png")
+        
+        # Use cmap='gray' to save the single channel 28x28 array correctly
+        plt.imsave(filepath, image_array, cmap='gray_r')
+        
+    print("Successfully saved all single class samples.")
+
+# --- Execution Loop ---
+# This loop uses the existing `trainer_dict`, `conf`, and `arg_dict`.
+for key, trainer in trainer_dict.items():
+    save_single_sample_per_class(
+        trainer,
+        conf,
+        key,
+        class_names, # Defined earlier in your original code
+        test_labels, # Defined earlier in your original code
+        seed=sample_seed,
+        cmpe_steps=cmpe_steps, 
+        fmpe_step_size=fmpe_step_size,
+        method=arg_dict[key].method,
+    )
 
 # def create_mean_std_plots(
 #     trainer, seed=42, filepath=None, n_samples=500, cmpe_steps=30, fmpe_step_size=1 / 248, method=""
@@ -244,7 +350,7 @@ def create_sample_plots(trainer, seed=42, filepath=None, cmpe_steps=30, fmpe_ste
 
         # Obtain samples and clip to prior range, instead of rejecting
         if method == "cmpe":
-            samples = trainer.amortizer.sample_addim(inp, n_steps=cmpe_steps, n_samples=n_samples)
+            samples = trainer.amortizer.sample(inp, n_steps=cmpe_steps, n_samples=n_samples)
         else:
             samples = trainer.amortizer.sample(inp, n_samples=n_samples, step_size=fmpe_step_size)
         samples = np.clip(samples, a_min=-1.01, a_max=1.01)
@@ -417,120 +523,161 @@ def create_sample_plots(trainer, seed=42, filepath=None, cmpe_steps=30, fmpe_ste
 
 
 
-##############################
-### New Metrics
-##############################
+from torchmetrics.image.fid import FrechetInceptionDistance
 
+############################## 
+### New Metrics 
+############################## 
+import torch 
+import torch.nn.functional as F 
+from skimage.metrics import peak_signal_noise_ratio, structural_similarity, mean_squared_error 
+from torchmetrics.image.kid import KernelInceptionDistance 
+import torchvision.transforms.functional as TF 
+import lpips 
+import numpy as np 
+import timeit 
+import random 
 
-from skimage.metrics import peak_signal_noise_ratio, structural_similarity, mean_squared_error
-import torchvision.transforms.functional as TF
-import torch
-import lpips
-import numpy as np
-import os
-import timeit
-import torch.nn.functional as F
-from torchmetrics.image.kid import KernelInceptionDistance
+# === SETING SEEDS === 
+SEED = sample_seed
+random.seed(SEED) 
+np.random.seed(SEED) 
+torch.manual_seed(SEED) 
 
-# Initialize LPIPS metric
-lpips_metric = lpips.LPIPS(net='alex')  # Pretrained LPIPS model
-
-# Initialize KID metric
-kid_metric = KernelInceptionDistance(subset_size=50)
-
-all_psnr = []
-all_ssim = []
-all_lpips = []
-all_mses = []
-
+# === CONFIG === 
+batch_size = 64 
 n_samples = 1
-n_datasets = 1000
-parameters = conf["parameters"][:n_datasets]
+n_datasets = 10000
+img_size = 28
 
-def render_from_params(param_vector):
-    """
-    Reshape a flattened parameter vector into a (28, 28) image.
-    Assumes input is a 1D array of shape (784,).
-    """
-    return param_vector.reshape(28, 28)
 
+# === DEVICE SETUP === 
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu") 
+print(device) 
+torch.backends.cudnn.benchmark = True # optimize conv performance 
+
+# === METRICS === 
+lpips_metric = lpips.LPIPS(net='alex').to(device) 
+
+# === INPUT PARAMS === 
+parameters = conf["parameters"][:n_datasets] 
+
+def render_from_params(param_vector): 
+   img = param_vector.reshape(img_size, img_size) 
+   return (img + 1.0) / 2.0 # scale to [0,1]
 for key, trainer in trainer_dict.items():
-    print(key, end="")
+    print(f"== Evaluating trainer: {key} ==")
 
-    # sample once, to avoid contaminating timing with tracing
+    kid_metric = KernelInceptionDistance(subset_size=100).to(device)
+    fid_metric = FrechetInceptionDistance(feature=2048).to(device)  # FID feature dim 2048
+
+    # Pre-initialize model
+    # if args.type == "addim":
+    #     c = conf["summary_conditions"][0, None]
+    #     with torch.no_grad():
+    #         trainer.amortizer.sample_addim({"summary_conditions": c}, n_steps=cmpe_steps, n_samples=n_samples, c1=args.c1 , c2=args.c2)
+    # else:
     c = conf["summary_conditions"][0, None]
-    print(f" Initializing...")
-    if arg_dict[key].method == "cmpe":
-        trainer.amortizer.sample_addim({"summary_conditions": c}, n_steps=cmpe_steps, n_samples=n_samples)
-    
-    for theta in np.linspace(3,3,1):
-        # store samples
-        post_samples = np.zeros((n_datasets, n_samples, conf["parameters"].shape[-1]))
+    # with torch.no_grad():
+    #         trainer.amortizer.sample({"summary_conditions": c}, n_steps=cmpe_steps, n_samples=n_samples)
+
+    for theta in np.linspace(50, 50, 1):
+        all_psnr, all_ssim, all_lpips, all_mses = [], [], [], []
 
         tic = timeit.default_timer()
-        for i in range(n_datasets):
-            print(f"{i+1:03}/{n_datasets}", end="\r")
-            c = conf["summary_conditions"][i, None]
-            if arg_dict[key].method == "cmpe":
-                post_samples[i] = trainer.amortizer.sample_addim(
-                    {"summary_conditions": c}, n_steps=cmpe_steps, n_samples=n_samples#, theta=theta
-                )
 
-            # Ground truth
-            true_param = parameters[i]
-            true_img = render_from_params(true_param)  # (28, 28)
-            true_tensor = TF.to_tensor(true_img).repeat(3, 1, 1).unsqueeze(0) * 2 - 1
-            true_tensor_299 = F.interpolate(
-                ((true_tensor + 1) * 127.5).clamp(0, 255), size=(299, 299), mode='bilinear', align_corners=False
-            ).to(torch.uint8)
+        with torch.no_grad():
+            for b_start in range(0, n_datasets, batch_size):
+                b_end = min(b_start + batch_size, n_datasets)
+                b_size = b_end - b_start
+
+                batch_params = parameters[b_start:b_end]
+                batch_conditions = conf["summary_conditions"][b_start:b_end]
+
+                # === SAMPLE FROM MODEL ===
+                # if args.type == "addim":
+                #     batch_samples = []
+                #     for i in range(b_size):
+                #         sample = trainer.amortizer.sample_addim(
+                #             {"summary_conditions": batch_conditions[i, None]},
+                #             n_steps=cmpe_steps,
+                #             n_samples=n_samples,
+                #             c1=args.c1,
+                #             c2=args.c2
+                #         )
+                #         batch_samples.append(sample[0])
+                #     batch_samples = np.stack(batch_samples)
+                # else:
+                batch_samples = []
+                for i in range(b_size):
+                    sample = trainer.amortizer.sample(
+                        {"summary_conditions": batch_conditions[i, None]},
+                        n_steps=cmpe_steps,
+                        n_samples=n_samples,
+                        sampler=sampler
+                    )
+                    batch_samples.append(sample[0])
+                batch_samples = np.stack(batch_samples)
+
+                # === RENDER ===
+                true_imgs = np.stack([render_from_params(p) for p in batch_params])
+                recon_imgs = np.stack([render_from_params(p) for p in batch_samples])
+
+                true_tensors = torch.stack([TF.to_tensor(i) for i in true_imgs]).to(device)
+                recon_tensors = torch.stack([TF.to_tensor(i) for i in recon_imgs]).to(device)
+
+                # === FOR KID & FID (resize to 299x299, convert to uint8) ===
+
+                # Convert grayscale to RGB by repeating channel
+                if true_tensors.shape[1] == 1:
+                    true_tensors = true_tensors.repeat(1, 3, 1, 1)
+                    recon_tensors = recon_tensors.repeat(1, 3, 1, 1)
 
 
+                true_299 = F.interpolate((true_tensors * 255).clamp(0, 255),
+                                         size=(299, 299), mode='bilinear', align_corners=False)
+                recon_299 = F.interpolate((recon_tensors * 255).clamp(0, 255),
+                                          size=(299, 299), mode='bilinear', align_corners=False)
 
-            # Accumulate metrics across samples
-            sample_psnr = []
-            sample_ssim = []
-            sample_lpips = []
-            sample_mse = []
+                true_uint8 = true_299.to(torch.uint8)
+                recon_uint8 = recon_299.to(torch.uint8)
 
-            for j in range(n_samples):
-                recon_img = render_from_params(post_samples[i, j])
-                recon_tensor = TF.to_tensor(recon_img).repeat(3, 1, 1).unsqueeze(0) * 2 - 1
-                recon_tensor_299 = F.interpolate(
-                    ((recon_tensor + 1) * 127.5).clamp(0, 255), size=(299, 299), mode='bilinear', align_corners=False
-                ).to(torch.uint8)
-                # Add to KID (distribution-level comparison)
-                kid_metric.update(true_tensor_299, real=True)
-                kid_metric.update(recon_tensor_299, real=False)
+                kid_metric.update(true_uint8, real=True)
+                kid_metric.update(recon_uint8, real=False)
 
-                # Image-level metrics
-                psnr = peak_signal_noise_ratio(true_img, recon_img, data_range=1.0)
-                ssim = structural_similarity(true_img, recon_img, data_range=1.0)
-                mse = mean_squared_error(true_img, recon_img)
+                fid_metric.update(true_uint8, real=True)
+                fid_metric.update(recon_uint8, real=False)
 
-                img1_lpips = F.interpolate(recon_tensor, size=(64, 64), mode='bilinear', align_corners=False).float()
-                img2_lpips = F.interpolate(true_tensor, size=(64, 64), mode='bilinear', align_corners=False).float()
-                lp = lpips_metric(img1_lpips, img2_lpips).item()
+                # === FOR LPIPS ===
+                true_lpips = F.interpolate((true_tensors * 2 - 1), size=(64, 64), mode='bilinear', align_corners=False)
+                recon_lpips = F.interpolate((recon_tensors * 2 - 1), size=(64, 64), mode='bilinear', align_corners=False)
 
-                sample_psnr.append(psnr)
-                sample_ssim.append(ssim)
-                sample_lpips.append(lp)
-                sample_mse.append(mse)
+                lpips_vals = lpips_metric(true_lpips, recon_lpips).squeeze().cpu().numpy()
+                all_lpips.extend(lpips_vals.tolist())
 
-            # Average over all posterior samples for this dataset
-            all_psnr.append(np.mean(sample_psnr))
-            all_ssim.append(np.mean(sample_ssim))
-            all_lpips.append(np.mean(sample_lpips))
-            all_mses.append(np.mean(sample_mse))
+                # === PSNR / SSIM / MSE ===
+                for i in range(b_size):
+                    psnr = peak_signal_noise_ratio(true_imgs[i], recon_imgs[i], data_range=1.0)
+                    ssim = structural_similarity(true_imgs[i], recon_imgs[i], channel_axis=-1, data_range=1.0)
+                    mse = mean_squared_error(true_imgs[i], recon_imgs[i])
+                    all_psnr.append(psnr)
+                    all_ssim.append(ssim)
+                    all_mses.append(mse)
 
         toc = timeit.default_timer()
         duration = toc - tic
 
-        # Final KID score
         kid_mean, kid_std = kid_metric.compute()
+        fid_val = fid_metric.compute()
 
-        print(f"Theta: {theta:.3f}"
-              f"Avg PSNR: {np.mean(all_psnr):.2f}dB, "
-              f"SSIM: {np.mean(all_ssim):.3f}, "
-              f"LPIPS: {np.mean(all_lpips):.3f}, "
-              f"MSE: {np.mean(all_mses):.3f}, "
-              f"KID: {kid_mean.item():.4f} ± {kid_std.item():.4f}")
+        print(
+            f"Theta: {theta:.3f} | "
+            f"PSNR: {np.mean(all_psnr):.2f} dB | "
+            f"SSIM: {np.mean(all_ssim):.3f} | "
+            f"LPIPS: {np.mean(all_lpips):.3f} | "
+            f"MSE: {np.mean(all_mses):.6f} | "
+            f"KID: {kid_mean.item():.4f} ± {kid_std.item():.4f} | "
+            f"FID: {fid_val.item():.4f} | "
+            f"Time: {duration:.2f}s"
+        )
