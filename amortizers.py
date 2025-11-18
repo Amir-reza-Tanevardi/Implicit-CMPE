@@ -2,8 +2,6 @@ import bayesflow.default_settings as defaults
 import numpy as np
 import tensorflow as tf
 from bayesflow.amortizers import AmortizedPosterior
-from skimage.util import random_noise
-from scipy.ndimage import gaussian_filter
 
 # Training helpers
 from bayesflow.exceptions import SummaryStatsError
@@ -301,8 +299,6 @@ class ConsistencyAmortizer(AmortizedPosterior):
         self.input_dim = consistency_net.input_dim
         self.condition_dim = consistency_net.condition_dim
 
-        self.img_size = 32
-
         self.student = consistency_net
         self.student.build(
             input_shape=(
@@ -366,7 +362,7 @@ class ConsistencyAmortizer(AmortizedPosterior):
         target_vars = input_dict[defaults.DEFAULT_KEYS["parameters"]]
 
         # Compute output
-        inp = target_vars + t[:, None, None] * z
+        inp = target_vars + t * z
         net_out = self.consistency_function(inp, full_cond, t, **kwargs)
 
         # Return summary outputs or not, depending on parameter
@@ -389,19 +385,29 @@ class ConsistencyAmortizer(AmortizedPosterior):
         """
         F = self.student([x, c, t], **kwargs)
 
-        # if len(F.shape) == 4:
-        #   batch_size = tf.shape(F)[0]
-        #   flattened_dim = tf.reduce_prod(tf.shape(F)[1:])
-        #   F = tf.reshape(F, (batch_size, flattened_dim))
-
         # Compute skip and out parts (vectorized, since self.sigma2 is of shape (1, input_dim)
         # Thus, we can do a cross product with the time vector which is (batch_size, 1) for
         # a resulting shape of cskip and cout of (batch_size, input_dim)
         cskip = self.sigma2 / ((t - self.eps) ** 2 + self.sigma2)
         cout = self.sigma * (t - self.eps) / (tf.math.sqrt(self.sigma2 + t**2))
 
-        out = cskip[:, None, None] * x + cout[:, None, None] * F
+        out = cskip * x + cout * F
         return out
+    
+    @tf.function
+    def _get_drift(self, x, c, t, **kwargs):
+        """
+        Computes the drift/velocity vector v(x, t) for the Probability Flow ODE
+        based on the consistency function's output f(x, t) (the predicted sample).
+
+        Drift v(x, t) = f(x, t) - x
+        """
+        # f(x, t) is the predicted clean sample/target
+        f_xt = self.consistency_function(x, c, t, **kwargs)
+        
+        # Drift vector for the reverse ODE (from T_max to eps)
+        # v(x, t) = f(x, t) - x
+        return (x-f_xt) / tf.math.sqrt(t ** 2 + self.eps**2)
 
     def compute_loss(self, input_dict, **kwargs):
         """Computes the loss of the posterior amortizer given an input dictionary, which will
@@ -457,7 +463,7 @@ class ConsistencyAmortizer(AmortizedPosterior):
         # weighting function, see https://arxiv.org/pdf/2310.14189.pdf, Section 3.1
         lam = 1 / (t2 - t1)
         # Pseudo-huber loss, see https://arxiv.org/pdf/2310.14189.pdf, Section 3.3
-        loss = tf.reduce_mean(lam[:, None, None] * (tf.sqrt(tf.square(teacher_out - student_out) + self.c_huber2) - self.c_huber))
+        loss = tf.reduce_mean(lam * (tf.sqrt(tf.square(teacher_out - student_out) + self.c_huber2) - self.c_huber))
 
         # Case summary loss should be computed
         if self.summary_loss is not None:
@@ -470,79 +476,11 @@ class ConsistencyAmortizer(AmortizedPosterior):
         total_loss = tf.reduce_mean(loss) + sum_loss
         return total_loss
 
-
-    def deblur_gaussian_wiener(self, blurred_tensor, psf_sigma=2.5, K=1e-3):
-          """
-          Deblurs a batch of blurred Fashion MNIST images using Wiener deconvolution.
-          
-          Parameters:
-          ----------
-          blurred_tensor : tf.Tensor of shape [batch_size, 784]
-              Flattened, blurred grayscale images (28x28).
-          psf_sigma : float
-              Standard deviation of Gaussian PSF used in the blur.
-          K : float
-              Regularization strength (higher = more smoothing, less noise amplification).
-              
-          Returns:
-          -------
-          deblurred_tensor : tf.Tensor of shape [batch_size, 784]
-              Deblurred image tensor (flattened 28x28).
-          """
-          size = self.img_size
-          batch_size = tf.shape(blurred_tensor)[0]
-
-          # Generate Gaussian PSF
-          ax = np.arange(-size // 2 + 1., size // 2 + 1.)
-          xx, yy = np.meshgrid(ax, ax)
-          psf = np.exp(-(xx**2 + yy**2) / (2. * psf_sigma**2))
-          psf /= np.sum(psf)
-
-          # Center PSF in a 28x28 grid
-          psf_padded = np.zeros((size, size))
-          cx = size // 2 - psf.shape[0] // 2
-          cy = size // 2 - psf.shape[1] // 2
-          psf_padded[cx:cx+psf.shape[0], cy:cy+psf.shape[1]] = psf
-
-          # Get Wiener filter in Fourier domain
-          H_f = np.fft.fft2(np.fft.ifftshift(psf_padded))
-          H_f_conj = np.conj(H_f)
-          wiener_filter = H_f_conj / (np.abs(H_f)**2 + K)
-          wiener_filter_tf = tf.constant(wiener_filter, dtype=tf.complex64)
-
-          # Apply FFT-based deconvolution
-          blurred_imgs = tf.reshape(blurred_tensor, [-1, size, size])
-          blurred_fft = tf.signal.fft2d(tf.cast(blurred_imgs, tf.complex64))
-          deblurred_fft = blurred_fft * wiener_filter_tf
-          deblurred_imgs = tf.math.real(tf.signal.ifft2d(deblurred_fft))
-          return tf.reshape(deblurred_imgs, [-1, size*size])
-
-
-    def sample_implicit(self, input_dict, n_samples, n_steps=10, to_numpy=True, step_size=1e-3, theta=50, **kwargs):
-        """Generates random draws from the approximate posterior given a dictionary with conditonal variables
-        using the multistep sampling algorithm (Algorithm 1).
-
-        Parameters
-        ----------
-        input_dict  : dict
-            Input dictionary containing the following mandatory keys, if ``DEFAULT_KEYS`` unchanged:
-            ``summary_conditions`` : the conditioning variables (including data) that are first passed through a summary network
-            ``direct_conditions``  : the conditioning variables that the directly passed to the inference network
-        n_samples   : int
-            The number of posterior draws (samples) to obtain from the approximate posterior
-        n_steps     : int
-            The number of sampling steps
-        TODO: This does not seem to work in some cases
-        to_numpy    : bool, optional, default: True
-            Flag indicating whether to return the samples as a ``np.ndarray`` or a ``tf.Tensor``
-        **kwargs    : dict, optional, default: {}
-            Additional keyword arguments passed to the networks
-
-        Returns
-        -------
-        post_samples : tf.Tensor or np.ndarray of shape (n_data_sets, n_samples, n_params)
-            The sampled parameters from the approximate posterior of each data set
+    def sample(self, input_dict, n_samples, n_steps=10, sampler=None, to_numpy=True, **kwargs):
+        """Generates random draws from the approximate posterior given conditional variables.
+        Dispatches to the selected sampling algorithm.
         """
+        current_sampler = sampler
 
         # Compute condition (direct, summary, or both)
         _, conditions = self._compute_summary_condition(
@@ -551,448 +489,176 @@ class ConsistencyAmortizer(AmortizedPosterior):
             training=False,
             **kwargs,
         )
-        n_data_sets, condition_dim = tf.shape(conditions)
+        n_data_sets = tf.shape(conditions)[0]
+        assert tf.shape(conditions)[1] == self.condition_dim
 
-        #conds = input_dict.get(defaults.DEFAULT_KEYS["summary_conditions"])
-        #conds = self.deblur_gaussian_wiener(conds)
+        # Discretized time steps. ODE samplers run in reverse (T_max -> eps)
+        discretized_time = discretize_time(self.eps, self.T_max, n_steps)
+        ode_times = tf.reverse(discretized_time, axis=[-1])
 
-        assert condition_dim == self.condition_dim
+        if current_sampler == "cm_multistep":
+            post_samples = self._sample_cm_multistep(conditions, n_samples, ode_times, **kwargs)
+        elif current_sampler == "euler":
+            post_samples = self._sample_euler(conditions, n_samples, ode_times, **kwargs)
+        elif current_sampler == "heun":
+            post_samples = self._sample_heun(conditions, n_samples, ode_times, **kwargs)
+        elif current_sampler == "dpm_solver":
+            post_samples = self._sample_dpm_solver(conditions, n_samples, ode_times, **kwargs)
+        else:
+            raise NotImplementedError(f"Sampler '{current_sampler}' not supported. Options are 'cm_multistep', 'euler', 'heun', 'dpm_solver'.")
 
+
+        # Remove trailing first dimension in the single data case
+        if n_data_sets == 1:
+            post_samples = tf.squeeze(post_samples, axis=0)
+
+        # Return numpy version of tensor or tensor itself
+        if to_numpy:
+            return post_samples.numpy()
+        return post_samples
+
+    def _sample_cm_multistep(self, conditions, n_samples, discretized_time, **kwargs):
+        """
+        Original Consistency Model multistep sampling algorithm (Algorithm 1 variant).
+        """
+        n_data_sets = tf.shape(conditions)[0]
         post_samples = np.empty(shape=(n_data_sets, n_samples, self.input_dim), dtype=np.float32)
-        n_data_sets, condition_dim = conditions.shape
 
         for i in range(n_data_sets):
             c = conditions[i, None]
             c_rep = tf.concat([c] * n_samples, axis=0)
-            discretized_time = tf.reverse(discretize_time(self.eps, self.T_max, n_steps), axis=[-1])
-            z_init = tf.random.normal((n_samples, self.input_dim), stddev=self.T_max)
-            T = discretized_time[0] + tf.zeros((n_samples, 1))
-            x_n = z_init
-            #t_n = discretized_time[0] 
-            #t_nm1 = discretized_time[1]
-
-            #sigma_nm1 = tf.math.sqrt( (t_nm1**2 * (t_n**2 - t_nm1**2))/(t_n**2) )
-
-            #c1 = tf.math.sqrt( (t_nm1**2 )/(t_n**2) )
-            #c2 = 1 - c1
-
-            #x_n = conds[i, None]
-            #x_n = tf.concat([x_n] * n_samples, axis=0) + 0.1*z_init
-
             
-            samples = self.consistency_function(x_n, c_rep, T)
-
-            eta = 0
-            #teta = 50
-            theta = tf.cast(theta, tf.float32)
-        
-            for n in range(1, n_steps):
+            # Initial sampling step (t_N = T_max)
+            T_max_scalar = discretized_time[0]
+            T = T_max_scalar + tf.zeros((n_samples, 1))
+            # z_init ~ N(0, T_max^2 I)
+            z_init = tf.random.normal((n_samples, self.input_dim), stddev=T_max_scalar)
+            
+            # First sample is f(z_init, T_max)
+            samples = self.consistency_function(z_init, c_rep, T)
+            
+            # Subsequent steps (n=1 to N-1)
+            for n in range(1, tf.shape(discretized_time)[0]):
+                t_n = discretized_time[n]
+                t_n_rep = t_n + tf.zeros((n_samples, 1))
+                
+                # Resample noise z ~ N(0, I)
                 z = tf.random.normal((n_samples, self.input_dim))
-                # alpha_nm1 = 1 /  (discretized_time[n-1] ** 2 - self.eps**2 + 1)
-                # alpha_n = 1 /  (discretized_time[n] ** 2 - self.eps**2 + 1)
-
-                t_n = discretized_time[n] 
-                t_nm1 = discretized_time[n+1]
-
-                sigma_nm1 = eta * tf.math.sqrt( (t_nm1**2 * (t_n**2 - t_nm1**2))/(t_n**2) )
                 
-                s1 =  (theta  )*(t_nm1**2 - sigma_nm1**2)/(t_n**2)
-                s2 = (1  )*(t_nm1**2)/(t_n**2)
-                c1 = tf.math.sqrt( s1 )
-                c2 = tf.math.sqrt( 1 - s2 )
+                # The next noisy sample x_n is computed from the previous parameter estimate (samples)
+                # and the noise for the current step t_n.
+                # x_n = samples + sqrt(t_n^2 - eps^2) * z
+                x_n = samples + tf.math.sqrt(t_n ** 2 - self.eps**2) * z
                 
-                # c1 = 50*tf.math.sqrt( s1 )
-                # c2 = tf.math.sqrt( 1 - s2 )
-
-                # c1 = tf.math.sqrt( s1 )
-                # c2 = 1 - tf.math.sqrt(s2 )
-
-                x_nm1 = c1*x_n + c2*samples + (sigma_nm1) * z
-
-                #x_nm1 = x_nm1 - 0.1 * ((self.deblur_gaussian(c_rep) - samples)**2)
-
-                samples = self.consistency_function(x_nm1, c_rep, t_n + tf.zeros((n_samples, 1)))
-                x_n = x_nm1
-                
+                # New parameter estimate is f(x_n, t_n)
+                samples = self.consistency_function(x_n, c_rep, t_n_rep)
             post_samples[i] = samples
-
-        # Remove trailing first dimension in the single data case
-        if n_data_sets == 1:
-            post_samples = tf.squeeze(post_samples, axis=0)
-
-        # Return numpy version of tensor or tensor itself
-        if to_numpy:
-            return post_samples.numpy()
-        return post_samples
-
-    
         
-    def inpainting_mask(self, images, mask_size=8):
-      """
-      Applies an inpainting mask to a batch of flattened images (shape: [batch_size, 784]).
+        return tf.convert_to_tensor(post_samples, dtype=tf.float32)
 
-      Parameters:
-      -----------
-      images     : tf.Tensor of shape (batch_size, 784)
-      mask_size  : size of the square mask to apply on each image
-      """
-      batch_size = tf.shape(images)[0]
-      height = width = self.img_size
-
-      # Reshape to (batch_size, 28, 28)
-      images_reshaped = tf.reshape(images, (batch_size, height, width))
-
-      def mask_single_image(image):
-          # Random top-left corner
-          # top = tf.random.uniform([], 0, height - mask_size, dtype=tf.int32)
-          # left = tf.random.uniform([], 0, width - mask_size, dtype=tf.int32)
-          
-          top = 10
-          left = 10
-
-          # Create a mask of ones
-          mask = tf.ones_like(image)
-
-          # Apply 0s in square region
-          mask = tf.tensor_scatter_nd_update(
-              mask,
-              indices=tf.reshape(tf.stack(tf.meshgrid(tf.range(top, top + mask_size),
-                                                      tf.range(left, left + mask_size),
-                                                      indexing='ij'), axis=-1), [-1, 2]),
-              updates=tf.zeros([mask_size * mask_size], dtype=image.dtype) - 1
-          )
-
-          return image * mask
-
-      # Apply the mask to each image in the batch
-      masked_images = tf.map_fn(mask_single_image, images_reshaped)
-
-      # Flatten back to (batch_size, 784)
-      return tf.reshape(masked_images, (batch_size, height * width))
-
-    
-
-    def blur(self, images):
-        batch_size = tf.shape(images)[0]
-        height = width = self.img_size
-
-        images_reshaped = tf.reshape(images, (batch_size, height, width, 3))
-
-        def grayscale_camera_np(image, noise="poisson", psf_width=2.5, noise_scale=1, noise_gain=0.5):
-            image = noise_scale * image
-            image = noise_gain * random_noise(image, mode=noise)
-            image = np.stack([gaussian_filter(image[..., c], sigma=psf_width) for c in range(3)], axis=-1)
-            return image.astype(np.float32)
-
-        def tf_wrapper(image):
-            return tf.numpy_function(
-                func=grayscale_camera_np,
-                inp=[image],
-                Tout=tf.float32
-            )
-
-        masked_images = tf.map_fn(tf_wrapper, images_reshaped)
-
-        return tf.reshape(masked_images, (batch_size, self.img_size, self.img_size, 3))
-        
-    
-
-    def sample_addim(self,
-           input_dict,
-           n_samples,
-           n_steps: int = 2,
-           theta = 0.9,
-           eta: float = 0.0,           # ← new hyperparameter
-           to_numpy: bool = True,
-           c1: float = 1.0,
-           c2: float = 1.0,  
-           img_size: int = 32,          
-           **kwargs):
-        """
-        DDIM / consistency‐model sampler following eq. (9) in your notes:
-
-            x_{t_{n-1}} = 
-              sqrt((t_{n-1}^2 - σ_{n-1}^2) / t_n^2) · x_{t_n}
-            + (1 - sqrt((t_{n-1}^2 - σ_{n-1}^2) / t_n^2)) · x₀_pred
-            + σ_{n-1} · z,       z∼N(0,I)
-
-        where σ_{n-1} = η · sqrt((t_n^2 − t_{n-1}^2)·t_{n-1}^2 / t_n^2).
-        """
-
-        self.img_size = img_size       
-
-        # 1) compute conditioning
-        _, conditions = self._compute_summary_condition(
-            input_dict.get(defaults.DEFAULT_KEYS["summary_conditions"]),
-            input_dict.get(defaults.DEFAULT_KEYS["direct_conditions"]),
-            training=False,
-            **kwargs
-        )
-
-        conds = input_dict.get(defaults.DEFAULT_KEYS["summary_conditions"])
-        conds_d = self.deblur_gaussian_wiener(conds)
-        conds_0 = conds
-        
-        n_data, _ = tf.shape(conditions)
-        # 2) build the time‐grid t_N > … > t_0
-        ts = tf.reverse(discretize_time(self.eps, self.T_max, n_steps), axis=[-1])
-        # ts[n] = t_n.  ts[0] = T_max, ts[-1] = eps
-
-        d = float(self.input_dim)
-
-        out = []
-        for i in range(n_data):
-            c = conditions[i:i+1]                     # (1,cond_dim)
-            #cond = conds_d                 # (1,cond_dim)
-        
-            c_rep = tf.repeat(c, n_samples, axis=0)   # (n_samples, cond_dim)
-            cond_rep = tf.repeat(conds_d, n_samples, axis=0)   # (n_samples, input_dim)
-            cond_rep0 = tf.repeat(conds_0, n_samples, axis=0)
-            #print(cond_rep.shape) 
-            # 3) sample initial x_{t_N} ∼ Normal(0, t_N^2 I)
-            t_N = ts[0]
-            x = tf.random.normal((n_samples, self.img_size, self.img_size, 3)) #* t_N
-
-            # 4) DDIM loop
-            for n in range(len(ts)-1):
-                t_n     = ts[n]     # current time
-                t_prev  = ts[n+1]   # next (smaller) time
-
-                t_p = 1.0*ts[n]
-
-                # ← predict clean x₀:
-                x0_pred = self.consistency_function(
-                    x, c_rep, 
-                    tf.fill((n_samples,1), t_n)
-                )
-                
-                s = tf.random.normal((n_samples, self.img_size, self.img_size, 3))
-                x = x0_pred + t_p * s
-
-                #print(x0_pred.shape)
-
-                # calculate x_var
-
-                #x_var1 = tf.reduce_sum((tf.reshape(cond_rep, (n_samples, 3*32*32)) - x0_pred)**2, axis=1, keepdims=True) / d
-                # x_var = tf.norm((tf.reshape(cond_rep, (n_samples, 784)) - x0_pred), ord=2)**2
-                # cc = -1.0 + 2 * tf.reshape(cond_rep0, (n_samples, 784)) / 255.0
-                # x_var_0 = tf.norm((cc - self.inpainting_mask(tf.reshape(x0_pred, (n_samples,28,28)))), ord=2)**2 
-                # x_var_1 = tf.norm((cc - x0_pred), ord=2)**2 
-                # x_var_2 = 0.1 /(2 + t_p**2)
-                
-
-                cc = tf.reshape(cond_rep0, (n_samples, self.img_size, self.img_size, 3))
-                x0_scaled = (np.clip(x0_pred, a_min=-1.00, a_max=1.00))
-                cc = (1.00 + cc) / 2.00
-                x_var_0 = tf.norm((cc - (1.00 + self.blur(x0_scaled))/2.00 ), ord=2)**2 
-                x_var_1 = tf.norm((cc - x0_pred), ord=2)**2
-                x_var_2 = tf.norm((tf.reshape(cond_rep, (n_samples, self.img_size, self.img_size, 3)) - x0_pred), ord=2)**2
-
-
-                #print(f"x_var: {x_var}")
-                # ← compute σ_{n-1} and the “α” coefficient a = sqrt((t_prev² − σ²)/t_n²)
-                sigma = eta * tf.sqrt(
-                    (t_p**2 - t_prev**2) * (t_prev**2) / (t_p**2)
-                )
-                a = tf.sqrt((t_prev**2 - sigma**2) / (t_p**2))
-                #print(f"a: {a}")
-                # ← the DDIM mean:
-                err = (x - x0_pred)
-                
-                norm22 = tf.reduce_sum(err**2, axis=1, keepdims=True)
-                norm2 = tf.norm(err,ord=2)**2
-                if n == len(ts)-2:
-                  err_coef = 0
-                else:
-                  # print(a**2)
-                  # print(tf.reduce_min(x0_pred).numpy())
-                  # print(tf.reduce_max(x0_pred).numpy())
-                  # print(tf.reduce_min(self.blur(x0_scaled)).numpy())
-                  # print(tf.reduce_max(self.blur(x0_scaled)).numpy())
-                  # print(tf.reduce_min(cc).numpy())
-                  # print(tf.reduce_max(cc).numpy())
-                  # print(100*x_var_0*((1-a)**2)/norm2)
-                  #print(x_var_0)
-                  # print("")
-                  err_coef = c1 * tf.sqrt(a**2 + c2*x_var_0*((1-a)**2)/norm2)#*((1-a)**2)/(norm2))#*((1.0 - a)**2)/norm2) 
-                #err_coef = 5.90*tf.sqrt(a**2 + 1.0*x_var*((a))/norm2)#*((1-a)**2)/(norm2))#*((1.0 - a)**2)/norm2) 
-                #err_coef = a
-                
-                #print(f"err_coef2: {err_coef2}")
-                #print(f"err_coef: {err_coef}")
-                #print(f"ration: {err_coef2/err_coef}")
-
-                #print(f"a: {a}")
-
-                x_mean = x0_pred + err_coef * err
-                #x_mean = a * x + (1.0 - a) * x0_pred
-
-                # ← add noise (if η>0)
-                if eta > 0:
-                    z = tf.random.normal((n_samples, self.img_size, self.img_size, 3))
-                    x = x_mean + sigma * z
-                else:
-                    x = x_mean
-
-            out.append(x)
-
-        # stack and possibly squeeze
-        post = tf.stack(out, axis=0)  # (n_data, n_samples, input_dim)
-        if n_data == 1:
-            post = tf.squeeze(post, 0)
-
-        return post.numpy() if to_numpy else post
-        
-
-    def sample_addim2(self,
-           input_dict,
-           n_samples,
-           n_steps: int = 10,
-           eta: float = 0.99,           # ← new hyperparameter
-           to_numpy: bool = True,
-           **kwargs):
-        """
-        DDIM / consistency‐model sampler following eq. (9) in your notes:
-
-            x_{t_{n-1}} = 
-              sqrt((t_{n-1}^2 - σ_{n-1}^2) / t_n^2) · x_{t_n}
-            + (1 - sqrt((t_{n-1}^2 - σ_{n-1}^2) / t_n^2)) · x₀_pred
-            + σ_{n-1} · z,       z∼N(0,I)
-
-        where σ_{n-1} = η · sqrt((t_n^2 − t_{n-1}^2)·t_{n-1}^2 / t_n^2).
-        """
-
-        # 1) compute conditioning
-        _, conditions = self._compute_summary_condition(
-            input_dict.get(defaults.DEFAULT_KEYS["summary_conditions"]),
-            input_dict.get(defaults.DEFAULT_KEYS["direct_conditions"]),
-            training=False,
-            **kwargs
-        )
-        n_data, _ = tf.shape(conditions)
-
-        # 2) build the time‐grid t_N > … > t_0
-        ts = tf.reverse(discretize_time(self.eps, self.T_max, n_steps), axis=[-1])
-        # ts[n] = t_n.  ts[0] = T_max, ts[-1] = eps
-
-        out = []
-        for i in range(n_data):
-            c = conditions[i:i+1]                     # (1,cond_dim)
-            c_rep = tf.repeat(c, n_samples, axis=0)   # (n_samples, cond_dim)
-
-            # 3) sample initial x_{t_N} ∼ Normal(0, t_N^2 I)
-            t_N = ts[0]
-            x = tf.random.normal((n_samples, self.input_dim)) #* t_N
-
-            # 4) DDIM loop
-            for n in range(len(ts)-1):
-                t_n     = ts[n]     # current time
-                t_prev  = ts[n+1]   # next (smaller) time
-                t_p = 0.9*ts[n][:, None, None]
-
-                # ← predict clean x₀:
-                x0_pred = self.consistency_function(
-                    x, c_rep, 
-                    tf.fill((n_samples,1), t_n)
-                )
-                
-                s = tf.random.normal((n_samples, self.img_size, self.img_size, 3))
-                x = x0_pred + t_p * s
-
-                # ← compute σ_{n-1} and the “α” coefficient a = sqrt((t_prev² − σ²)/t_n²)
-                sigma = eta * tf.sqrt(
-                    (t_p**2 - t_prev**2) * (t_prev**2) / (t_p**2)
-                )
-                a = tf.sqrt((t_prev**2 - sigma**2) / (t_p**2))
-
-                # ← the DDIM mean:
-                x_mean = a[:, None, None] * x + (1.0 - a)[:, None, None] * x0_pred
-
-                # ← add noise (if η>0)
-                if eta > 0:
-                    z = tf.random.normal((n_samples, self.img_size, self.img_size, 3))
-                    x = x_mean + sigma[:, None, None] * z
-                else:
-                    x = x_mean
-
-            out.append(x)
-
-        # stack and possibly squeeze
-        post = tf.stack(out, axis=0)  # (n_data, n_samples, input_dim)
-        if n_data == 1:
-            post = tf.squeeze(post, 0)
-
-        return post.numpy() if to_numpy else post
-
-      
-    def sample(self, input_dict, n_samples, n_steps=10, to_numpy=True, step_size=1e-3, img_size= 32, **kwargs):
-        """Generates random draws from the approximate posterior given a dictionary with conditonal variables
-        using the multistep sampling algorithm (Algorithm 1).
-
-        Parameters
-        ----------
-        input_dict  : dict
-            Input dictionary containing the following mandatory keys, if ``DEFAULT_KEYS`` unchanged:
-            ``summary_conditions`` : the conditioning variables (including data) that are first passed through a summary network
-            ``direct_conditions``  : the conditioning variables that the directly passed to the inference network
-        n_samples   : int
-            The number of posterior draws (samples) to obtain from the approximate posterior
-        n_steps     : int
-            The number of sampling steps
-        TODO: This does not seem to work in some cases
-        to_numpy    : bool, optional, default: True
-            Flag indicating whether to return the samples as a ``np.ndarray`` or a ``tf.Tensor``
-        **kwargs    : dict, optional, default: {}
-            Additional keyword arguments passed to the networks
-
-        Returns
-        -------
-        post_samples : tf.Tensor or np.ndarray of shape (n_data_sets, n_samples, n_params)
-            The sampled parameters from the approximate posterior of each data set
-        """
-
-        self.img_size = img_size
-
-        # Compute condition (direct, summary, or both)
-        _, conditions = self._compute_summary_condition(
-            input_dict.get(defaults.DEFAULT_KEYS["summary_conditions"]),
-            input_dict.get(defaults.DEFAULT_KEYS["direct_conditions"]),
-            training=False,
-            **kwargs,
-        )
-        n_data_sets, condition_dim = tf.shape(conditions)
-
-        assert condition_dim == self.condition_dim
-
-        post_samples = np.empty(shape=(n_data_sets, n_samples, self.img_size, self.img_size, 3), dtype=np.float32)
-        n_data_sets, condition_dim = conditions.shape
+    def _sample_euler(self, conditions, n_samples, discretized_time, **kwargs):
+        """ODE solver: Euler Method (first-order)."""
+        n_data_sets = tf.shape(conditions)[0]
+        post_samples = np.empty(shape=(n_data_sets, n_samples, self.input_dim), dtype=np.float32)
 
         for i in range(n_data_sets):
-            c = conditions[i, None]
-            c_rep = tf.concat([c] * n_samples, axis=0)
-            discretized_time = tf.reverse(discretize_time(self.eps, self.T_max, n_steps), axis=[-1])
-            z_init = tf.random.normal((n_samples, self.img_size, self.img_size, 3), stddev=self.T_max)
-            T = discretized_time[0] + tf.zeros((n_samples, 1))
-            samples = self.consistency_function(z_init, c_rep, T)
-            for n in range(1, n_steps):
-                z = tf.random.normal((n_samples, self.img_size, self.img_size, 3))
-                x_n = samples + tf.math.sqrt(discretized_time[n] ** 2 - self.eps**2) * z
-                samples = self.consistency_function(x_n, c_rep, discretized_time[n] + tf.zeros((n_samples, 1)))
+            c_rep = tf.concat([conditions[i, None]] * n_samples, axis=0)
+            
+            # Initialize samples from noise at T_max (t_N = discretized_time[0])
+            t_max_scalar = discretized_time[0]
+            samples = tf.random.normal((n_samples, self.input_dim), stddev=t_max_scalar)
+
+            for n in range(tf.shape(discretized_time)[0] - 1):
+                t_n = discretized_time[n]
+                t_n_plus_1 = discretized_time[n+1]
+                dt = t_n_plus_1 - t_n # Negative step size for reverse ODE
+                
+                t_n_rep = t_n + tf.zeros((n_samples, 1))
+
+                # Compute drift/velocity v(x_n, t_n)
+                drift_n = self._get_drift(samples, c_rep, t_n_rep, **kwargs)
+
+                # Euler step: x_{n+1} = x_n + v(x_n, t_n) * dt
+                samples = samples + drift_n * dt
+            
             post_samples[i] = samples
 
-        # Remove trailing first dimension in the single data case
-        if n_data_sets == 1:
-            post_samples = tf.squeeze(post_samples, axis=0)
+        return tf.convert_to_tensor(post_samples, dtype=tf.float32)
 
-        # Return numpy version of tensor or tensor itself
-        if to_numpy:
-            return post_samples.numpy()
-        return post_samples
+    def _sample_heun(self, conditions, n_samples, discretized_time, **kwargs):
+        """ODE solver: Heun's Method (second-order Predictor-Corrector)."""
+        n_data_sets = tf.shape(conditions)[0]
+        post_samples = np.empty(shape=(n_data_sets, n_samples, self.input_dim), dtype=np.float32)
+
+        for i in range(n_data_sets):
+            c_rep = tf.concat([conditions[i, None]] * n_samples, axis=0)
+            
+            # Initialize samples from noise at T_max (t_N = discretized_time[0])
+            t_max_scalar = discretized_time[0]
+            samples = tf.random.normal((n_samples, self.input_dim), stddev=t_max_scalar)
+
+            for n in range(tf.shape(discretized_time)[0] - 1):
+                t_n = discretized_time[n]
+                t_n_plus_1 = discretized_time[n+1]
+                dt = t_n_plus_1 - t_n # Negative step size for reverse ODE
+                
+                t_n_rep = t_n + tf.zeros((n_samples, 1))
+                t_n_plus_1_rep = t_n_plus_1 + tf.zeros((n_samples, 1))
+
+                # 1. Predict (Euler step)
+                drift_n = self._get_drift(samples, c_rep, t_n_rep, **kwargs)
+                x_pred = samples + drift_n * dt
+
+                # 2. Correct (Evaluate drift at predicted point)
+                drift_pred = self._get_drift(x_pred, c_rep, t_n_plus_1_rep, **kwargs)
+
+                # Heun's step: x_{n+1} = x_n + 0.5 * (v_n + v_{n+1}) * dt
+                samples = samples + 0.5 * (drift_n + drift_pred) * dt
+
+            post_samples[i] = samples
+
+        return tf.convert_to_tensor(post_samples, dtype=tf.float32)
+
+    def _sample_dpm_solver(self, conditions, n_samples, discretized_time, **kwargs):
+        """ODE solver: DPM-Solver (Simplified 2nd-order Runge-Kutta/Midpoint Rule approximation)."""
+        n_data_sets = tf.shape(conditions)[0]
+        post_samples = np.empty(shape=(n_data_sets, n_samples, self.input_dim), dtype=np.float32)
+
+        for i in range(n_data_sets):
+            c_rep = tf.concat([conditions[i, None]] * n_samples, axis=0)
+            
+            # Initialize samples from noise at T_max (t_N = discretized_time[0])
+            t_max_scalar = discretized_time[0]
+            samples = tf.random.normal((n_samples, self.input_dim), stddev=t_max_scalar)
+
+            for n in range(tf.shape(discretized_time)[0] - 1):
+                t_n = discretized_time[n]
+                t_n_plus_1 = discretized_time[n+1]
+                dt = t_n_plus_1 - t_n # Negative step size for reverse ODE
+                
+                t_n_rep = t_n + tf.zeros((n_samples, 1))
+                
+                # k1 = v(x_n, t_n)
+                k1 = self._get_drift(samples, c_rep, t_n_rep, **kwargs)
+
+                # Midpoint calculation
+                t_mid = t_n + 0.5 * dt 
+                t_mid_rep = t_mid + tf.zeros((n_samples, 1))
+                x_mid = samples + 0.5 * dt * k1
+                
+                # k2 = v(x_mid, t_mid)
+                k2 = self._get_drift(x_mid, c_rep, t_mid_rep, **kwargs)
+
+                # Step: x_{n+1} = x_n + dt * k2
+                samples = samples + dt * k2
+            
+            post_samples[i] = samples
+
+        return tf.convert_to_tensor(post_samples, dtype=tf.float32)
 
     def _compute_summary_condition(self, summary_conditions, direct_conditions, **kwargs):
         """Determines how to concatenate the provided conditions."""
-        
-        #s = summary_conditions
+
         # Compute learnable summaries, if given
         if self.summary_net is not None:
             sum_condition = self.summary_net(summary_conditions, **kwargs)
@@ -1008,7 +674,7 @@ class ConsistencyAmortizer(AmortizedPosterior):
             full_cond = direct_conditions
         else:
             raise SummaryStatsError("Could not concatenarte or determine conditioning inputs...")
-        return sum_condition, full_cond 
+        return sum_condition, full_cond
 
     def _determine_summary_loss(self, loss_fun):
         """Determines which summary loss to use if default `None` argument provided, otherwise return identity."""
