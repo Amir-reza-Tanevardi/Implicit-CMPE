@@ -50,7 +50,7 @@ def configurator_superres(f):
 
     # Produce 14x14 LR images
     degraded = np.stack([
-        superres2x_degrade(f["sim_data"][b])
+        superres_degrade(f["sim_data"][b])
         for b in range(B)
     ]).astype(np.float32)
 
