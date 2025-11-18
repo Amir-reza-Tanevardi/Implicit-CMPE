@@ -539,7 +539,7 @@ import timeit
 import random 
 
 # === SETING SEEDS === 
-SEED = 42 
+SEED = sample_seed
 random.seed(SEED) 
 np.random.seed(SEED) 
 torch.manual_seed(SEED) 
