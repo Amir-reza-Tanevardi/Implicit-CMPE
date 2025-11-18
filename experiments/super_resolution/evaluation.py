@@ -132,7 +132,7 @@ def to_id(method, architecture, num_train):
 checkpoint_path_dict = {
     #to_id("cmpe", "unet", 2000): "checkpoints/cmpe-unet-2000-25-04-03-093413/",
     #to_id("cmpe", "unet", 2000): "checkpoints/cmpe-unet-2000-25-16-04-099999/",
-    to_id("cmpe", "unet", 60000): "/content/Implicit-CMPE/experiments/bayesian_denoising/checkpoints/cmpe-unet-60000-25-04-10-150038/",
+    to_id("cmpe", "unet", 60000): "checkpoints/",
 }
 
 arg_dict = {}
